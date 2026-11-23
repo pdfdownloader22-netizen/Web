@@ -1,735 +1,1103 @@
 // =========================================================
-// RWA SKY PRO - MASTER WEB ADMIN PANEL ENGINE (admin.js)
+// RWA ULTRA-PRO COMMAND CENTER ENGINE (admin.js)
+// Secured via rwa-security.js (HMAC-SHA256 + E2E AES-256)
+// Auto-Refresh: Every 5 Minutes + Instant Manual Refresh
 // =========================================================
 
-let ADMIN_API_BASE = localStorage.getItem("rwa_admin_api_base") || "https://pdfsownlaoder.onrender.com";
-let ADMIN_KEY = localStorage.getItem("rwa_admin_key") || sessionStorage.getItem("rwa_admin_key") || "";
+const ADMIN_API_BASE = "https://pdfsownlaoder.onrender.com";
+const AUTO_REFRESH_SECONDS = 300; // 5 minutes
 
 let adminState = {
-    activeTab: "dashboard",
+    token: sessionStorage.getItem("rwa_admin_sess_token") || "",
+    activeTab: "overview",
     userPage: 1,
     userFilter: "all",
-    activeDossier: null,
-    activeModalTab: "profile",
-    activityTimer: null
+    currentDossier: null,
+    activeDossierTab: "info",
+    cachedSettings: null,
+    refreshLeft: AUTO_REFRESH_SECONDS,
+    refreshTimerId: null
 };
 
-const TAB_TITLES = {
-    dashboard: "📊 Overview & 4-MongoDB Cluster",
-    users: "👥 All Users & A-to-Z Inspector",
-    activity: "🔴 Global Live Activity Feed",
-    tokens: "🔑 Cloud Token Pool Manager",
-    controls: "🛠️ Maintenance & Alert Controls",
-    notices: "📢 Live Notice Board Manager",
-    reports: "🚩 User Reports & Batch Requests",
-    errors: "🐞 System & Portal Error Logs Folder",
-    backup: "💾 Full 4-DB JSON Cluster Backup"
-};
-
-function escHtml(str) {
-    return String(str ?? "N/A")
+// =========================================================
+// HELPERS & SECURED ADMIN API WRAPPER
+// =========================================================
+function esc(str) {
+    return String(str ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 }
 
-function fmtDur(sec) {
-    const s = parseInt(sec || 0, 10);
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
-}
-
-function showToast(msg, type = "info") {
-    const stack = document.getElementById("toastStack");
+function adminToast(msg, type = "info") {
+    const stack = document.getElementById("adminToastStack");
     if (!stack) return;
     const colors = {
         success: "bg-emerald-600",
         error: "bg-rose-600",
-        info: "bg-blue-600",
-        warning: "bg-amber-600"
+        warning: "bg-amber-600",
+        info: "bg-blue-600"
     };
     const el = document.createElement("div");
-    el.className = `toast-item ${colors[type] || colors.info}`;
+    el.className = `admin-toast ${colors[type] || colors.info}`;
     el.textContent = msg;
     stack.appendChild(el);
-    setTimeout(() => el.remove(), 3500);
+    setTimeout(() => {
+        el.style.opacity = "0";
+        el.style.transition = "opacity 0.25s";
+        setTimeout(() => el.remove(), 260);
+    }, 3000);
 }
 
-async function adminFetch(path, options = {}) {
-    const headers = {
-        "Content-Type": "application/json",
-        "X-Admin-Key": ADMIN_KEY,
-        ...(options.headers || {})
-    };
-    try {
-        const res = await fetch(`${ADMIN_API_BASE}${path}`, { ...options, headers });
-        if (res.status === 401) {
-            logoutAdmin(false);
-            showToast("Session expired ya invalid Admin Key!", "error");
-            return null;
-        }
-        return await res.json();
-    } catch {
-        showToast("Backend server se connect nahi ho paya. Thodi der baad retry karein.", "error");
-        return null;
+async function adminApi(path, method = "GET", bodyObj = null) {
+    const headers = {};
+    if (adminState.token) {
+        headers["X-Admin-Token"] = adminState.token;
     }
+    const opts = { method, headers };
+    if (bodyObj !== null && method !== "GET") {
+        opts.body = bodyObj;
+    }
+
+    const res = await window.rwaSecureFetch(`${ADMIN_API_BASE}${path}`, opts);
+
+    if (res.status === 401 && path !== "/api/admin/auth") {
+        lockAdminPanel("Session expired. Kripya Admin Key se dobara unlock karein.");
+        throw new Error("Unauthorized");
+    }
+    return res;
 }
 
 // =========================================================
-// AUTH & INITIALIZATION
+// AUTH, LOCK SCREEN & 5-MINUTE AUTO-REFRESH ENGINE
 // =========================================================
-async function verifyAdminLogin() {
-    const keyVal = document.getElementById("adminKeyInput").value.trim();
-    const srvVal = document.getElementById("adminServerInput").value.trim().replace(/\/+$/, "");
-    const remember = document.getElementById("rememberAdminKey").checked;
+window.unlockAdminPanel = async function() {
+    const inp = document.getElementById("adminKeyInput");
+    const errEl = document.getElementById("adminLoginErr");
+    const btn = document.getElementById("unlockBtn");
+    const key = (inp ? inp.value : "").trim();
 
-    if (!keyVal) {
-        showToast("Kripya Admin Secret Key enter karein.", "warning");
+    if (!key) {
+        errEl.textContent = "Kripya Master Admin Key dalein.";
+        errEl.classList.remove("hidden");
         return;
     }
 
-    const btn = document.getElementById("adminLoginBtn");
+    errEl.classList.add("hidden");
     btn.disabled = true;
-    btn.textContent = "🔄 Verifying Admin Key...";
+    btn.textContent = "🔐 Verifying Encrypted Handshake...";
 
-    ADMIN_KEY = keyVal;
-    if (srvVal) {
-        ADMIN_API_BASE = srvVal;
-        localStorage.setItem("rwa_admin_api_base", srvVal);
+    try {
+        const res = await window.rwaSecureFetch(`${ADMIN_API_BASE}/api/admin/auth`, {
+            method: "POST",
+            body: { admin_key: key }
+        });
+
+        if (res.ok && res.data && res.data.status === "success" && res.data.admin_token) {
+            adminState.token = res.data.admin_token;
+            sessionStorage.setItem("rwa_admin_sess_token", adminState.token);
+            if (inp) inp.value = "";
+            showAdminWorkspace();
+            adminToast("🔓 Command Center Unlocked!", "success");
+        } else {
+            errEl.textContent = (res.data && res.data.message) || "Invalid Admin Key or Security Block!";
+            errEl.classList.remove("hidden");
+        }
+    } catch {
+        errEl.textContent = "Server unreachable. Render backend status check karein.";
+        errEl.classList.remove("hidden");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "🔓 Unlock Command Center";
     }
+};
 
-    const res = await adminFetch("/api/admin/auth", { method: "POST" });
-    btn.disabled = false;
-    btn.textContent = "🔓 Unlock Admin Dashboard";
-
-    if (res && res.status === "success") {
-        if (remember) localStorage.setItem("rwa_admin_key", ADMIN_KEY);
-        else sessionStorage.setItem("rwa_admin_key", ADMIN_KEY);
-
-        document.getElementById("adminLoginOverlay").classList.add("hidden");
-        document.getElementById("adminShell").classList.remove("hidden");
-        showToast("✅ Welcome to RWA Master Admin Panel!", "success");
-        switchAdminTab("dashboard");
-    } else {
-        ADMIN_KEY = "";
-        showToast("❌ Galat Admin Secret Key!", "error");
+window.lockAdminPanel = function(customMsg = "") {
+    adminState.token = "";
+    sessionStorage.removeItem("rwa_admin_sess_token");
+    if (adminState.refreshTimerId) clearInterval(adminState.refreshTimerId);
+    document.getElementById("adminMainShell")?.classList.add("hidden");
+    document.getElementById("adminLoginScreen")?.classList.remove("hidden");
+    const errEl = document.getElementById("adminLoginErr");
+    if (errEl) {
+        if (customMsg) {
+            errEl.textContent = customMsg;
+            errEl.classList.remove("hidden");
+        } else {
+            errEl.classList.add("hidden");
+        }
     }
+};
+
+function showAdminWorkspace() {
+    document.getElementById("adminLoginScreen")?.classList.add("hidden");
+    document.getElementById("adminMainShell")?.classList.remove("hidden");
+    startAutoRefreshClock();
+    switchAdminTab(adminState.activeTab || "overview");
 }
 
-function logoutAdmin(showMsg = true) {
-    localStorage.removeItem("rwa_admin_key");
-    sessionStorage.removeItem("rwa_admin_key");
-    ADMIN_KEY = "";
-    if (adminState.activityTimer) clearInterval(adminState.activityTimer);
-    document.getElementById("adminShell").classList.add("hidden");
-    document.getElementById("adminLoginOverlay").classList.remove("hidden");
-    if (showMsg) showToast("🔒 Admin Panel Locked.", "info");
+function startAutoRefreshClock() {
+    if (adminState.refreshTimerId) clearInterval(adminState.refreshTimerId);
+    adminState.refreshLeft = AUTO_REFRESH_SECONDS;
+    updateCountdownLabel();
+
+    adminState.refreshTimerId = setInterval(() => {
+        adminState.refreshLeft--;
+        if (adminState.refreshLeft <= 0) {
+            adminState.refreshLeft = AUTO_REFRESH_SECONDS;
+            refreshCurrentTab(true);
+        }
+        updateCountdownLabel();
+    }, 1000);
 }
 
-function toggleMobileSidebar(open) {
-    const sb = document.getElementById("adminSidebar");
-    const bd = document.getElementById("sidebarBackdrop");
-    if (open) {
-        sb.classList.add("open");
-        bd.classList.remove("hidden");
-    } else {
-        sb.classList.remove("open");
-        bd.classList.add("hidden");
-    }
+function updateCountdownLabel() {
+    const el = document.getElementById("autoRefreshCountdown");
+    if (!el) return;
+    const m = String(Math.floor(adminState.refreshLeft / 60)).padStart(2, "0");
+    const s = String(adminState.refreshLeft % 60).padStart(2, "0");
+    el.textContent = `⏱ Auto-Refresh in ${m}:${s}`;
 }
 
-function toggleAdminTheme() {
-    const isDark = document.body.classList.toggle("dark-mode");
-    localStorage.setItem("rwa_admin_dark", isDark ? "1" : "0");
-    document.getElementById("themeToggleBtn").textContent = isDark ? "☀️ Asmani Sky Mode" : "🌙 Dark Mode";
+window.manualRefreshAdmin = function() {
+    adminState.refreshLeft = AUTO_REFRESH_SECONDS;
+    updateCountdownLabel();
+    adminToast("🔄 Syncing live 4-DB data...", "info");
+    refreshCurrentTab(false);
+};
+
+async function refreshCurrentTab(isAuto = false) {
+    const t = adminState.activeTab;
+    try {
+        if (t === "overview") await loadOverview();
+        else if (t === "radar") await loadRadarAndActivities();
+        else if (t === "users") await loadUsers(adminState.userPage);
+        else if (t === "analytics") await loadAnalytics();
+        else if (t === "tokens") await loadCloudTokens();
+        else if (t === "content") await loadContentHub();
+        else if (t === "controls") await loadControls();
+        else if (t === "reports") await loadReports();
+        else if (t === "security") await loadSecurityTab();
+
+        if (isAuto) adminToast("⏱ 5-Min Auto-Refresh Completed", "info");
+    } catch {}
 }
 
-function switchAdminTab(tab) {
+window.toggleAdminSidebar = function() {
+    document.getElementById("adminSidebar")?.classList.toggle("open-mob");
+};
+
+window.toggleAdminTheme = function() {
+    const isDark = document.body.classList.toggle("dark-admin");
+    localStorage.setItem("rwa_admin_dark_v1", isDark ? "1" : "0");
+};
+
+if (localStorage.getItem("rwa_admin_dark_v1") === "1") {
+    document.body.classList.add("dark-admin");
+}
+
+window.switchAdminTab = function(tab) {
     adminState.activeTab = tab;
-    toggleMobileSidebar(false);
+    document.getElementById("adminSidebar")?.classList.remove("open-mob");
 
-    document.querySelectorAll(".admin-tab-section").forEach(el => el.classList.add("hidden"));
-    const target = document.getElementById(`tab_${tab}`);
-    if (target) target.classList.remove("hidden");
+    document.querySelectorAll(".atab-section").forEach(s => s.classList.add("hidden"));
+    document.getElementById(`tab_${tab}`)?.classList.remove("hidden");
 
-    document.querySelectorAll(".side-nav-btn[data-tab]").forEach(b => {
-        b.classList.toggle("active", b.dataset.tab === tab);
+    document.querySelectorAll(".anav-btn[data-atab]").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.atab === tab);
     });
 
-    document.getElementById("activeTabTitle").textContent = TAB_TITLES[tab] || "Admin Panel";
-    refreshCurrentTab();
-}
+    const titles = {
+        overview: "📊 Overview & 4-MongoDB Cluster",
+        radar: "📡 Live Radar & Global Activity Feed",
+        users: "👥 All Users & A-Z Dossier",
+        analytics: "🏆 Top Performers & Test Analytics",
+        tokens: "🔑 Cloud Token Pool Manager",
+        content: "📢 Notices, Broadcasts, Quiz & CA Hub",
+        controls: "🎛️ Kill-Switches, Version & Promo Popup",
+        reports: "🚩 2-Way User Reports & Mistake Flags",
+        security: "🛡️ Security, IP Bans, Diagnostics & Logs"
+    };
+    const titleEl = document.getElementById("adminTabTitle");
+    if (titleEl) titleEl.textContent = titles[tab] || "RWA Admin Pro";
 
-function refreshCurrentTab() {
-    const t = adminState.activeTab;
-    if (t === "dashboard") loadDashboard();
-    else if (t === "users") loadUsers(adminState.userPage);
-    else if (t === "activity") loadGlobalActivity();
-    else if (t === "tokens") loadTokenPool();
-    else if (t === "controls") loadControlsTab();
-    else if (t === "notices") loadNoticesTab();
-    else if (t === "reports") loadReportsTab();
-    else if (t === "errors") loadErrorsTab();
-}
+    refreshCurrentTab(false);
+};
 
 // =========================================================
-// 1. OVERVIEW DASHBOARD & 4-MONGODB METERS
+// TAB 1: OVERVIEW, 7-DAY GROWTH CHART & 4-MONGODB SHARDS
 // =========================================================
-async function loadDashboard() {
+async function loadOverview() {
     const [statsRes, actRes] = await Promise.all([
-        adminFetch("/api/admin/stats"),
-        adminFetch("/api/admin/activities?limit=12")
+        adminApi("/api/admin/stats"),
+        adminApi("/api/admin/activities?limit=12")
     ]);
-    if (!statsRes || statsRes.status !== "success") return;
+    if (!statsRes.ok || !statsRes.data.stats) return;
 
-    const s = statsRes.stats;
-    const cfg = s.settings || {};
-
-    document.getElementById("lastSyncTime").textContent = `Updated: ${s.updated_at || "Just now"}`;
-    document.getElementById("connectedDbsBadge").textContent = `${s.connected_dbs} / 4 DBs Active`;
-    document.getElementById("maintHeaderBadge").classList.toggle("hidden", !cfg.maintenance_mode);
+    const st = statsRes.data.stats;
+    adminState.cachedSettings = st.settings || {};
+    document.getElementById("adminLastUpdated").textContent = `Updated: ${st.updated_at || "--"}`;
 
     const kpis = [
-        { icon: "👥", label: "Total Users", val: s.total_users, color: "text-blue-600" },
-        { icon: "🟢", label: "Active Today", val: s.active_today, color: "text-emerald-600" },
-        { icon: "🚫", label: "Blocked", val: s.blocked_users, color: "text-rose-600" },
-        { icon: "📝", label: "Tests Given", val: s.total_tests, color: "text-indigo-600" },
-        { icon: "🔑", label: "Cloud Tokens", val: s.total_admin_tokens, color: "text-amber-600" },
-        { icon: "🚩", label: "Reports / Errs", val: `${s.open_reports} / ${s.error_logs_count}`, color: "text-purple-600" }
+        { lbl: "Total Users", val: st.total_users, ico: "👥", cls: "text-blue-600" },
+        { lbl: "Live Right Now", val: st.live_radar_count || 0, ico: "📡", cls: "text-emerald-600" },
+        { lbl: "Online / Logged Out", val: `${st.online_users} / ${st.logged_out_users}`, ico: "🟢", cls: "text-teal-600" },
+        { lbl: "Active Today", val: st.active_today, ico: "🔥", cls: "text-orange-600" },
+        { lbl: "Tests Submitted", val: st.total_tests, ico: "📝", cls: "text-indigo-600" },
+        { lbl: "Cloud Tokens", val: st.total_admin_tokens, ico: "🔑", cls: "text-amber-600" },
+        { lbl: "Blocked / IP Bans", val: `${st.blocked_users} / ${st.banned_ips_count || 0}`, ico: "🚫", cls: "text-rose-600" },
+        { lbl: "Reports / Errors", val: `${st.open_reports} / ${st.error_logs_count}`, ico: "🚩", cls: "text-pink-600" }
     ];
 
-    document.getElementById("kpiGrid").innerHTML = kpis.map(k => `
+    document.getElementById("kpiCardsGrid").innerHTML = kpis.map(k => `
         <div class="kpi-card">
-            <div class="text-2xl">${k.icon}</div>
-            <div class="text-2xl font-black mt-1 ${k.color}">${k.val}</div>
-            <div class="text-[11px] font-bold opacity-70 uppercase mt-0.5">${k.label}</div>
+            <div class="flex items-center justify-between">
+                <span class="text-xl">${k.ico}</span>
+                <span class="text-[10px] font-black uppercase opacity-60">${k.lbl}</span>
+            </div>
+            <div class="text-2xl font-black mt-2 ${k.cls}">${k.val}</div>
         </div>`).join("");
 
-    // 4-DB Shards Grid
-    const shards = s.per_db || [];
-    document.getElementById("shardsGrid").innerHTML = shards.length ? shards.map(d => {
-        if (d.error) {
-            return `<div class="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 font-bold text-xs text-rose-700">${d.label}: ❌ Connection Error</div>`;
-        }
-        const pct = Math.min(100, Math.round((d.size_mb / d.max_mb) * 100));
-        const barColor = pct > 80 ? "#e11d48" : pct > 55 ? "#f59e0b" : "#10b981";
+    // 7-Day Growth Chart
+    const gBox = document.getElementById("growth7dChart");
+    const days = st.growth_7d || [];
+    const maxVal = Math.max(1, ...days.flatMap(d => [d.active_users, d.tests, d.new_users]));
+    gBox.innerHTML = days.map(d => {
+        const aH = Math.max(6, Math.round((d.active_users / maxVal) * 100));
+        const tH = Math.max(6, Math.round((d.tests / maxVal) * 100));
+        const nH = Math.max(6, Math.round((d.new_users / maxVal) * 100));
         return `
-            <div class="p-4 rounded-2xl bg-sky-50/80 dark:bg-slate-800/70 border border-sky-200 dark:border-slate-700">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="font-black text-sm">${d.label}</span>
-                    <span class="text-xs font-extrabold">${d.size_mb} / 512 MB (${pct}%)</span>
+            <div class="flex-1 min-w-[66px] flex flex-col items-center justify-end h-full gap-1.5" title="${d.date}: Active ${d.active_users}, Tests ${d.tests}, New ${d.new_users}">
+                <div class="flex items-end gap-1 h-28">
+                    <div class="w-3 bg-blue-600 rounded-t-md" style="height:${aH}%"></div>
+                    <div class="w-3 bg-emerald-500 rounded-t-md" style="height:${tH}%"></div>
+                    <div class="w-3 bg-purple-600 rounded-t-md" style="height:${nH}%"></div>
                 </div>
-                <div class="shard-bar-track mb-2.5">
-                    <div class="shard-bar-fill" style="width:${pct}%; background:${barColor};"></div>
-                </div>
-                <div class="flex justify-between text-[11px] font-bold opacity-80">
-                    <span>👤 ${d.users} Users</span>
-                    <span>📝 ${d.tests} Tests</span>
-                </div>
-            </div>`;
-    }).join("") : `<div class="col-span-full text-xs font-bold text-rose-600">No MongoDB shards connected.</div>`;
-
-    // Quick Switches
-    document.getElementById("quickSwitchesBox").innerHTML = `
-        <div class="flex items-center justify-between p-3.5 rounded-2xl bg-rose-50/80 dark:bg-slate-800/70 border border-rose-200/70">
-            <div>
-                <div class="font-extrabold text-xs">🚧 Maintenance Mode</div>
-                <div class="text-[11px] opacity-70">${cfg.maintenance_mode ? "Portal is LOCKED for users" : "Portal is LIVE"}</div>
-            </div>
-            <input type="checkbox" class="toggle-switch" ${cfg.maintenance_mode ? "checked" : ""} onchange="quickToggleSetting('maintenance_mode', this.checked)">
-        </div>
-        <div class="flex items-center justify-between p-3.5 rounded-2xl bg-sky-50/80 dark:bg-slate-800/70 border border-sky-200/70">
-            <div>
-                <div class="font-extrabold text-xs">🔔 Telegram Login Alerts</div>
-                <div class="text-[11px] opacity-70">Notify on every new login</div>
-            </div>
-            <input type="checkbox" class="toggle-switch" ${cfg.login_alerts ? "checked" : ""} onchange="quickToggleSetting('login_alerts', this.checked)">
-        </div>
-        <div class="flex items-center justify-between p-3.5 rounded-2xl bg-sky-50/80 dark:bg-slate-800/70 border border-sky-200/70">
-            <div>
-                <div class="font-extrabold text-xs">📝 Telegram Test Submit Alerts</div>
-                <div class="text-[11px] opacity-70">Notify when a student submits a mock test</div>
-            </div>
-            <input type="checkbox" class="toggle-switch" ${cfg.test_submit_alerts ? "checked" : ""} onchange="quickToggleSetting('test_submit_alerts', this.checked)">
-        </div>`;
-
-    // Mini Activity Feed
-    const acts = (actRes && actRes.activities) || [];
-    document.getElementById("miniActivityBox").innerHTML = acts.length ? acts.map(a => `
-        <div onclick="openUserDossier('${escHtml(a.user_id)}')" class="p-2.5 rounded-xl bg-sky-50/70 dark:bg-slate-800/60 border border-sky-200/60 cursor-pointer hover:border-blue-500">
-            <div class="flex justify-between items-center text-xs">
-                <span class="font-black truncate">${escHtml(a.user_name)} <span class="opacity-60 font-mono">#${escHtml(a.user_id)}</span></span>
-                <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">${escHtml(a.action)}</span>
-            </div>
-            <div class="text-[11px] opacity-80 truncate mt-0.5">${escHtml(a.detail)}</div>
-            <div class="text-[10px] opacity-55 mt-0.5">🕒 ${escHtml(a.time_str)}</div>
-        </div>`).join("") : `<div class="text-xs opacity-70 text-center py-6">No recent activity yet.</div>`;
-}
-
-async function quickToggleSetting(key, val) {
-    const res = await adminFetch("/api/admin/settings", {
-        method: "POST",
-        body: JSON.stringify({ [key]: val })
-    });
-    if (res && res.status === "success") {
-        showToast("✅ Setting Updated!", "success");
-        loadDashboard();
-    }
-}
-
-// =========================================================
-// 2. USERS LIST & A-TO-Z INSPECTOR MODAL
-// =========================================================
-function setUserFilter(mode, btn) {
-    adminState.userFilter = mode;
-    document.querySelectorAll(".u-filter-pill").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-    loadUsers(1);
-}
-
-async function loadUsers(page = 1) {
-    adminState.userPage = page;
-    const q = encodeURIComponent(document.getElementById("userSearchInput").value.trim());
-    const box = document.getElementById("usersListContainer");
-    box.innerHTML = `<div class="col-span-full py-10 text-center font-bold opacity-70">🔄 Loading users across 4 MongoDB shards...</div>`;
-
-    const res = await adminFetch(`/api/admin/users?page=${page}&per_page=12&q=${q}&filter=${adminState.userFilter}`);
-    if (!res || res.status !== "success") return;
-
-    const users = res.users || [];
-    if (!users.length) {
-        box.innerHTML = `<div class="col-span-full admin-glass-card p-8 rounded-3xl text-center font-bold opacity-70">Koi user nahi mila.</div>`;
-        document.getElementById("usersPagination").innerHTML = "";
-        return;
-    }
-
-    box.innerHTML = users.map(u => {
-        const cCnt = (u.purchased_courses || []).length;
-        const blkBadge = u.is_blocked
-            ? `<span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black">🚫 BLOCKED</span>`
-            : `<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">● ACTIVE</span>`;
-        return `
-            <div onclick="openUserDossier('${escHtml(u.user_id)}')" class="admin-glass-card p-4 rounded-2xl cursor-pointer hover:border-blue-500 transition flex flex-col justify-between gap-3">
-                <div>
-                    <div class="flex justify-between items-center gap-2">
-                        <span class="px-2 py-0.5 rounded bg-sky-100 text-sky-900 text-[10px] font-black">${escHtml(u.db_shard || "DB-1")}</span>
-                        ${blkBadge}
-                    </div>
-                    <h4 class="font-black text-base mt-2 truncate">${escHtml(u.name)}</h4>
-                    <div class="text-xs opacity-75 font-mono">UID: ${escHtml(u.user_id)} • 📱 ${escHtml(u.phone)}</div>
-                    <div class="text-[11px] opacity-70 truncate mt-1">⚡ ${escHtml(u.current_activity || "Idle")}</div>
-                </div>
-                <div class="flex justify-between items-center pt-2.5 border-t border-sky-200/50 text-[11px] font-extrabold">
-                    <span>🎓 ${cCnt} Courses • 🔥 ${u.study_streak || 1}d</span>
-                    <span class="text-blue-600">Inspect A-Z ➔</span>
-                </div>
+                <div class="text-[10px] font-black opacity-75">${d.label}</div>
+                <div class="text-[9px] font-bold opacity-60">${d.active_users}/${d.tests}/${d.new_users}</div>
             </div>`;
     }).join("");
 
-    const totalPages = Math.max(1, Math.ceil((res.total || 0) / 12));
-    document.getElementById("usersPagination").innerHTML = `
-        <button ${page <= 1 ? "disabled" : ""} onclick="loadUsers(${page - 1})" class="admin-btn-soft text-xs disabled:opacity-40">⬅ Prev</button>
-        <span class="text-xs font-extrabold">Page ${page} / ${totalPages} (${res.total} Users)</span>
-        <button ${page >= totalPages ? "disabled" : ""} onclick="loadUsers(${page + 1})" class="admin-btn-soft text-xs disabled:opacity-40">Next ➡</button>`;
+    // 4-DB Shard Health
+    document.getElementById("activeShardsBadge").textContent = `${st.connected_dbs} / 4 DBs Active`;
+    const shardBox = document.getElementById("shardsHealthContainer");
+    if (!st.per_db || !st.per_db.length) {
+        shardBox.innerHTML = `<div class="col-span-full p-3 rounded-xl bg-rose-100 text-rose-800 text-xs font-extrabold">No MongoDB shards connected. ${(st.connection_errors || []).join(" | ")}</div>`;
+    } else {
+        shardBox.innerHTML = st.per_db.map(db => {
+            const pct = Math.min(100, Math.round(((db.size_mb || 0) / (db.max_mb || 512)) * 100));
+            const barColor = pct > 80 ? "bg-rose-600" : (pct > 60 ? "bg-amber-500" : "bg-emerald-500");
+            return `
+                <div class="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/60 dark:border-slate-700 space-y-2">
+                    <div class="flex justify-between items-center text-xs font-black">
+                        <span>🗄️ ${esc(db.label)}</span>
+                        <span>${db.size_mb || 0} MB / 512 MB (${pct}%)</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                        <div class="h-full ${barColor}" style="width:${pct}%"></div>
+                    </div>
+                    <div class="text-[11px] font-bold opacity-70">👥 ${db.users || 0} Users • 📝 ${db.tests || 0} Tests</div>
+                </div>`;
+        }).join("");
+    }
+
+    // Quick Portal Switches
+    const s = st.settings || {};
+    document.getElementById("quickSwitchesBox").innerHTML = `
+        <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer">
+            <div><div class="font-black">🚧 Maintenance Mode</div><div class="opacity-65 text-[11px]">${s.maintenance_mode ? "Portal is LOCKED" : "Portal is LIVE"}</div></div>
+            <input type="checkbox" ${s.maintenance_mode ? "checked" : ""} onchange="toggleQuickSwitch('maintenance_mode', this.checked)" class="w-5 h-5 accent-rose-600">
+        </label>
+        <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer">
+            <div><div class="font-black">📱 Single-Device Guard</div><div class="opacity-65 text-[11px]">Auto-logout purana device on multi-login</div></div>
+            <input type="checkbox" ${s.single_device_guard ? "checked" : ""} onchange="toggleQuickSwitch('single_device_guard', this.checked)" class="w-5 h-5 accent-blue-600">
+        </label>
+        <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer">
+            <div><div class="font-black">🔔 Telegram Login Alerts</div><div class="opacity-65 text-[11px]">Notify on every new login</div></div>
+            <input type="checkbox" ${s.login_alerts ? "checked" : ""} onchange="toggleQuickSwitch('login_alerts', this.checked)" class="w-5 h-5 accent-emerald-600">
+        </label>
+        <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer">
+            <div><div class="font-black">📝 Telegram Test Submit Alerts</div><div class="opacity-65 text-[11px]">Notify when student submits mock test</div></div>
+            <input type="checkbox" ${s.test_submit_alerts ? "checked" : ""} onchange="toggleQuickSwitch('test_submit_alerts', this.checked)" class="w-5 h-5 accent-indigo-600">
+        </label>`;
+
+    // Overview Activities
+    const acts = (actRes.data && actRes.data.activities) || [];
+    document.getElementById("overviewActivitiesBox").innerHTML = acts.length
+        ? acts.map(renderActivityRowHtml).join("")
+        : `<div class="opacity-60 text-center py-6 font-bold">No recent activity yet.</div>`;
 }
 
-async function openUserDossier(uid) {
-    document.getElementById("userDossierModal").classList.remove("hidden");
-    document.getElementById("modalBodyContent").innerHTML = `<div class="py-12 text-center font-bold opacity-70">🔄 Fetching A-to-Z User Data...</div>`;
+window.toggleQuickSwitch = async function(key, val) {
+    const res = await adminApi("/api/admin/settings", "POST", { [key]: val });
+    if (res.ok) {
+        adminToast(`✅ ${key} updated!`, "success");
+        loadOverview();
+    }
+};
 
-    const res = await adminFetch(`/api/admin/user/${encodeURIComponent(uid)}`);
-    if (!res || res.status !== "success") {
-        closeUserModal();
+window.cleanOldClusterLogs = async function() {
+    if (!confirm("30 din se purane activity aur error logs delete karein? (Users aur Scorecards 100% safe rahenge)")) return;
+    const res = await adminApi("/api/admin/clean_old_logs", "POST", { days: 30 });
+    if (res.ok) {
+        adminToast(`🧹 Cleaned ${res.data.activity_deleted} activities & ${res.data.errors_deleted} errors!`, "success");
+        loadOverview();
+    }
+};
+
+function renderActivityRowHtml(a) {
+    return `
+        <div onclick="openUserDossier('${esc(a.user_id)}')" class="p-2.5 rounded-xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700 flex justify-between items-start gap-2 cursor-pointer hover:border-blue-500">
+            <div class="min-w-0">
+                <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[9px] font-black">${esc(a.action)}</span>
+                <span class="font-black ml-1">${esc(a.user_name)}</span>
+                <div class="opacity-75 mt-0.5 break-words">${esc(a.detail)}</div>
+            </div>
+            <span class="text-[10px] font-bold opacity-60 shrink-0">${esc(a.time_str)}</span>
+        </div>`;
+}
+
+// =========================================================
+// TAB 2: LIVE RADAR & GLOBAL ACTIVITY FEED
+// =========================================================
+async function loadRadarAndActivities() {
+    const [radRes, actRes] = await Promise.all([
+        adminApi("/api/admin/radar"),
+        adminApi("/api/admin/activities?limit=60")
+    ]);
+
+    const live = (radRes.data && radRes.data.live_users) || [];
+    document.getElementById("radarLiveCountPill").textContent = `${live.length} LIVE NOW`;
+    document.getElementById("liveRadarGrid").innerHTML = live.length ? live.map(u => `
+        <div onclick="openUserDossier('${esc(u.user_id)}')" class="p-3.5 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/30 border-2 border-emerald-300 dark:border-emerald-700 cursor-pointer space-y-1">
+            <div class="flex justify-between items-center gap-2">
+                <span class="font-black text-sm truncate">🟢 ${esc(u.name)} ${u.vip_badge ? `<span class="text-xs">${esc(u.vip_badge)}</span>` : ""}</span>
+                <span class="text-[10px] font-black text-emerald-700">${u.seconds_ago}s ago</span>
+            </div>
+            <div class="text-xs font-extrabold text-indigo-700 dark:text-sky-400 truncate">📍 ${esc(u.current_page)}</div>
+            <div class="text-[10px] font-bold opacity-70">UID: ${esc(u.user_id)} • ${esc(u.last_device)} • IP: ${esc(u.last_ip || "N/A")}</div>
+        </div>`).join("") : `<div class="col-span-full py-6 text-center text-xs font-bold opacity-65">Abhi koi student active radar window (last 2 min) mein nahi hai.</div>`;
+
+    const acts = (actRes.data && actRes.data.activities) || [];
+    document.getElementById("globalActivityList").innerHTML = acts.length
+        ? acts.map(renderActivityRowHtml).join("")
+        : `<div class="py-6 text-center opacity-65 font-bold">No activity logs found.</div>`;
+}
+
+// =========================================================
+// TAB 3: ALL USERS & FULL A-Z DOSSIER (SCORECARDS, MISTAKES, BOOKMARKS)
+// =========================================================
+window.setUserFilter = function(mode, btn) {
+    adminState.userFilter = mode;
+    document.querySelectorAll("#userFilterPills .ufilter-pill").forEach(b => b.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    loadUsers(1);
+};
+
+window.loadUsers = async function(page = 1) {
+    adminState.userPage = page;
+    const q = (document.getElementById("userSearchInput")?.value || "").trim();
+    const res = await adminApi(`/api/admin/users?page=${page}&per_page=16&q=${encodeURIComponent(q)}&filter=${encodeURIComponent(adminState.userFilter)}`);
+    if (!res.ok) return;
+
+    const users = res.data.users || [];
+    const total = res.data.total || 0;
+    const grid = document.getElementById("usersListGrid");
+
+    grid.innerHTML = users.length ? users.map(u => {
+        const statusBadge = u.is_blocked
+            ? `<span class="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 text-[10px] font-black">🚫 BLOCKED</span>`
+            : (u.is_logged_in === false
+                ? `<span class="px-2 py-0.5 rounded-full bg-slate-200 text-slate-700 text-[10px] font-black">⚪ LOGGED OUT</span>`
+                : `<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black">🟢 ONLINE</span>`);
+
+        const vipPill = u.vip_badge
+            ? `<span class="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[10px] font-black">${esc(u.vip_badge)}</span>`
+            : "";
+
+        return `
+            <div onclick="openUserDossier('${esc(u.user_id)}')" class="admin-glass p-4 rounded-2xl cursor-pointer hover:border-blue-500 transition space-y-2">
+                <div class="flex justify-between items-start gap-2">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="px-2 py-0.5 rounded bg-sky-100 text-sky-900 text-[10px] font-black">${esc(u.db_shard || "DB-1")}</span>
+                            ${vipPill}
+                            ${statusBadge}
+                        </div>
+                        <h4 class="font-black text-base mt-1 truncate">${esc(u.name || "RWA Student")}</h4>
+                        <div class="text-[11px] font-bold opacity-70">UID: ${esc(u.user_id)} • 📱 ${esc(u.phone || "N/A")}</div>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-xl bg-blue-600 text-white text-[10px] font-black shrink-0">Open A-Z →</span>
+                </div>
+                <div class="text-[11px] font-bold opacity-75 truncate">📍 ${esc(u.current_activity || "Active")} • 🕒 ${esc(u.last_seen || "")}</div>
+                <div class="flex gap-2 flex-wrap text-[10px] font-extrabold opacity-75 pt-1 border-t border-sky-200/40">
+                    <span>🔥 ${u.study_streak || 1}d</span>
+                    <span>🔖 ${u.bookmarks_count || 0} Saved</span>
+                    <span>❌ ${u.mistakes_count || 0} Mistakes</span>
+                    <span>💻 ${esc(u.last_device || "Web")}</span>
+                    <span>🌐 ${esc(u.last_ip || "N/A")}</span>
+                </div>
+            </div>`;
+    }).join("") : `<div class="col-span-full admin-glass p-8 text-center text-xs font-bold opacity-70">Koi student match nahi hua.</div>`;
+
+    const totalPages = Math.max(1, Math.ceil(total / 16));
+    document.getElementById("usersPagination").innerHTML = `
+        <button ${page <= 1 ? "disabled" : ""} onclick="loadUsers(${page - 1})" class="ufilter-pill">← Prev</button>
+        <span class="text-xs font-black">Page ${page} / ${totalPages} (${total} Users)</span>
+        <button ${page >= totalPages ? "disabled" : ""} onclick="loadUsers(${page + 1})" class="ufilter-pill">Next →</button>`;
+};
+
+// =========================================================
+// USER FULL A-Z DOSSIER MODAL
+// =========================================================
+window.openUserDossier = async function(uid) {
+    const modal = document.getElementById("userDossierModal");
+    modal.classList.remove("hidden");
+    document.getElementById("dossierTitle").textContent = `Loading User #${uid}...`;
+    document.getElementById("dossierBody").innerHTML = `<div class="py-10 text-center font-black opacity-70">🔄 Fetching Full Encrypted Dossier...</div>`;
+
+    const res = await adminApi(`/api/admin/user/${encodeURIComponent(uid)}`);
+    if (!res.ok || !res.data.dossier) {
+        document.getElementById("dossierBody").innerHTML = `<div class="py-8 text-center text-rose-600 font-black">User not found.</div>`;
         return;
     }
 
-    adminState.activeDossier = res.dossier;
-    const u = res.dossier.user || {};
-    document.getElementById("modalUserShard").textContent = `${res.dossier.shard} • UID ${u.user_id}`;
-    document.getElementById("modalUserName").textContent = `${u.name || "User"} ${u.is_blocked ? "(🚫 BLOCKED)" : ""}`;
-    document.getElementById("modalExportBtn").onclick = () => downloadJsonFile(res.dossier, `User_${u.user_id}_Dossier.json`);
+    adminState.currentDossier = res.data.dossier;
+    const u = adminState.currentDossier.user || {};
+    document.getElementById("dossierTitle").textContent = `${u.name || "Student"} ${u.vip_badge || ""} (${adminState.currentDossier.shard})`;
+    document.getElementById("dossierSubtitle").textContent = `UID: ${u.user_id} • 📱 ${u.phone || "N/A"} • IP: ${u.last_ip || "N/A"} • ${u.is_blocked ? "🚫 BLOCKED" : (u.is_logged_in === false ? "⚪ LOGGED OUT" : "🟢 ONLINE")}`;
 
-    const firstTab = document.querySelector(".m-tab-btn");
-    switchModalTab("profile", firstTab);
-}
+    switchDossierTab("info");
+};
 
-function closeUserModal() {
-    document.getElementById("userDossierModal").classList.add("hidden");
-}
+window.closeUserDossier = function() {
+    document.getElementById("userDossierModal")?.classList.add("hidden");
+};
 
-function switchModalTab(tab, btn) {
-    adminState.activeModalTab = tab;
-    document.querySelectorAll(".m-tab-btn").forEach(b => b.classList.remove("active"));
-    if (btn) btn.classList.add("active");
+window.switchDossierTab = function(tab) {
+    adminState.activeDossierTab = tab;
+    document.querySelectorAll("#dossierSubTabs .ufilter-pill").forEach(b => b.classList.toggle("active", b.dataset.dtab === tab));
 
-    const d = adminState.activeDossier;
+    const d = adminState.currentDossier;
     if (!d) return;
     const u = d.user || {};
     const sync = d.sync || {};
-    const body = document.getElementById("modalBodyContent");
+    const tests = d.tests || [];
+    const logs = d.logs || [];
+    const inbox = d.messages || [];
+    const box = document.getElementById("dossierBody");
 
-    if (tab === "profile") {
-        const isBlk = Boolean(u.is_blocked);
-        const notesCnt = Object.values(sync.video_notes || {}).reduce((a, b) => a + (Array.isArray(b) ? b.length : 0), 0);
-        body.innerHTML = `
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center">
-                <div class="p-3 rounded-2xl bg-sky-50 dark:bg-slate-800"><div class="text-lg font-black">${(u.purchased_courses || []).length}</div><div class="text-[10px] font-bold opacity-70">Courses</div></div>
-                <div class="p-3 rounded-2xl bg-sky-50 dark:bg-slate-800"><div class="text-lg font-black">${fmtDur(u.total_watch_seconds)}</div><div class="text-[10px] font-bold opacity-70">Watch Time</div></div>
-                <div class="p-3 rounded-2xl bg-sky-50 dark:bg-slate-800"><div class="text-lg font-black">${(d.tests || []).length}</div><div class="text-[10px] font-bold opacity-70">Tests</div></div>
-                <div class="p-3 rounded-2xl bg-sky-50 dark:bg-slate-800"><div class="text-lg font-black">🔥 ${u.study_streak || 1}d</div><div class="text-[10px] font-bold opacity-70">Streak</div></div>
+    if (tab === "info") {
+        const devicesHtml = (u.devices || []).map(dev => `
+            <div class="p-2 rounded-lg bg-sky-50/70 dark:bg-slate-800 flex justify-between text-[11px] font-bold">
+                <span>💻 ${esc(dev.device_type)} (${esc(dev.device_id)})</span>
+                <span>🌐 ${esc(dev.ip)} • ${esc(dev.last_seen)}</span>
+            </div>`).join("") || `<div class="opacity-60">No device records yet.</div>`;
+
+        box.innerHTML = `
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700">
+                <div><span class="opacity-65">Name:</span> <strong>${esc(u.name)}</strong></div>
+                <div><span class="opacity-65">User ID:</span> <strong class="font-mono">${esc(u.user_id)}</strong></div>
+                <div><span class="opacity-65">Phone:</span> <strong class="font-mono">${esc(u.phone)}</strong></div>
+                <div><span class="opacity-65">Email:</span> <strong class="break-all">${esc(u.email)}</strong></div>
+                <div><span class="opacity-65">Password / OTP:</span> <strong class="font-mono">${esc(u.password)}</strong></div>
+                <div><span class="opacity-65">State / District:</span> <strong>${esc(u.state_district)}</strong></div>
+                <div><span class="opacity-65">Category / Gender:</span> <strong>${esc(u.category_gender)}</strong></div>
+                <div><span class="opacity-65">Streak / Logins:</span> <strong>🔥 ${u.study_streak || 1}d • ${u.login_count || 1} Logins</strong></div>
+                <div><span class="opacity-65">Last Login:</span> <strong>${esc(u.last_login)}</strong></div>
+                <div><span class="opacity-65">Last Logout:</span> <strong>${esc(u.last_logout || "N/A")}</strong></div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/60 border border-sky-200/60">
-                <div><b>📱 Phone:</b> <span class="font-mono">${escHtml(u.phone)}</span></div>
-                <div><b>📧 Email:</b> <span class="break-all">${escHtml(u.email)}</span></div>
-                <div><b>🔐 Password:</b> <span class="font-mono text-rose-600 font-black">${escHtml(u.password)}</span></div>
-                <div><b>🔑 Method:</b> ${escHtml(u.login_method)} (#${u.login_count || 1})</div>
-                <div><b>🏛️ State/Dist:</b> ${escHtml(u.state_district)}</div>
-                <div><b>👤 Cat/Gender:</b> ${escHtml(u.category_gender)}</div>
-                <div><b>🕒 Last Seen:</b> ${escHtml(u.last_seen)}</div>
-                <div><b>📚 Sync Stats:</b> ⭐ ${(sync.bookmarks || []).length} | ❌ ${(sync.mistake_bank || []).length} | 🗒️ ${notesCnt}</div>
-            </div>
-
-            <div class="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-300/60 space-y-2">
-                <div class="flex flex-wrap justify-between items-center gap-2">
-                    <span class="text-xs font-black text-amber-800 dark:text-amber-300">🔑 User JWT Authorization Token</span>
-                    <div class="flex gap-2">
-                        <button onclick="navigator.clipboard.writeText('${escHtml(u.jwt_token || "")}'); showToast('Token Copied!', 'success');" class="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-extrabold text-[11px] border-0 cursor-pointer">📋 Copy</button>
-                        <button onclick="promoteUserToken('${escHtml(u.user_id)}', '${escHtml(u.name)}', '${escHtml(u.jwt_token || "")}')" class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-extrabold text-[11px] border-0 cursor-pointer">➕ Add to Cloud Pool</button>
+            <!-- Admin Control Actions (NO Student Support WA/Call buttons) -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700 space-y-2.5">
+                    <div class="font-black text-sm">🛡️ Account & Security Controls</div>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="adminToggleBlockUser('${esc(u.user_id)}', ${!u.is_blocked})" class="px-3.5 py-2 rounded-xl ${u.is_blocked ? "bg-emerald-600" : "bg-rose-600"} text-white font-extrabold border-0 cursor-pointer">${u.is_blocked ? "✅ Unblock Account" : "🚫 Block Account"}</button>
+                        <button onclick="adminForceLogoutUser('${esc(u.user_id)}')" class="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-extrabold border-0 cursor-pointer">🚪 Remote Force Logout</button>
+                        ${u.last_ip ? `<button onclick="adminBanUserIp('${esc(u.last_ip)}', '${esc(u.user_id)}')" class="px-3.5 py-2 rounded-xl bg-slate-900 text-white font-extrabold border-0 cursor-pointer">🌐 Ban IP (${esc(u.last_ip)})</button>` : ""}
+                    </div>
+                    <div class="pt-2 border-t border-sky-200/40">
+                        <div class="font-extrabold mb-1.5">⭐ Assign VIP / Topper Badge:</div>
+                        <div class="flex gap-1.5 flex-wrap">
+                            <button onclick="adminSetVip('${esc(u.user_id)}', '🏆 Topper')" class="ufilter-pill">🏆 Topper</button>
+                            <button onclick="adminSetVip('${esc(u.user_id)}', '⭐ VIP')" class="ufilter-pill">⭐ VIP</button>
+                            <button onclick="adminSetVip('${esc(u.user_id)}', '🔥 Regular')" class="ufilter-pill">🔥 Regular</button>
+                            <button onclick="adminSetVip('${esc(u.user_id)}', '')" class="ufilter-pill">✕ Clear</button>
+                        </div>
                     </div>
                 </div>
-                <div class="p-2.5 rounded-xl bg-white dark:bg-slate-900 font-mono text-[10px] break-all max-h-24 overflow-y-auto">${escHtml(u.jwt_token || "N/A")}</div>
+
+                <!-- Direct Personal Message Box -->
+                <div class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700 space-y-2">
+                    <div class="font-black text-sm">🔔 Send Direct Message (Student Bell Inbox)</div>
+                    <input id="pmTitleInp" type="text" placeholder="Message Title (e.g. Batch Added!)" class="admin-input">
+                    <textarea id="pmBodyInp" rows="2" placeholder="Write personal message for this student..." class="admin-input"></textarea>
+                    <button onclick="adminSendPersonalMsg('${esc(u.user_id)}')" class="admin-btn-primary w-full py-2 text-xs">🚀 Send to Student Inbox</button>
+                </div>
             </div>
 
-            <div class="p-4 rounded-2xl ${isBlk ? "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300" : "bg-rose-50 dark:bg-rose-950/30 border-rose-300"} border flex flex-wrap justify-between items-center gap-3">
-                <div class="text-xs">
-                    <div class="font-black">${isBlk ? "🚫 User is Currently BLOCKED" : "🛡️ Account Access Control"}</div>
-                    <div class="opacity-80">${isBlk ? "Reason: " + escHtml(u.block_reason) : "Block karne par student portal access nahi kar payega."}</div>
-                </div>
-                <button onclick="toggleBlockUser('${escHtml(u.user_id)}', ${!isBlk})" class="px-4 py-2 rounded-xl ${isBlk ? "bg-emerald-600" : "bg-rose-600"} text-white font-extrabold text-xs border-0 cursor-pointer">
-                    ${isBlk ? "✅ Unblock User" : "🚫 Block User"}
-                </button>
-            </div>`;
-    } else if (tab === "courses") {
-        const courses = u.purchased_courses || [];
-        body.innerHTML = courses.length ? courses.map((c, i) => `
-            <div class="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-slate-800/70 border border-sky-200/60 flex justify-between items-center">
-                <div>
-                    <div class="font-black text-sm">${i + 1}. ${escHtml(c.course_name)}</div>
-                    <div class="text-[11px] opacity-70 font-mono">Batch ID: ${escHtml(c.id)} • Test Series: ${escHtml(c.test_series_id || "N/A")}</div>
-                </div>
-                <span class="px-2.5 py-1 rounded-full bg-blue-100 text-blue-800 text-[10px] font-black uppercase">${escHtml(c.source || "own")}</span>
-            </div>`).join("") : `<div class="py-8 text-center text-xs font-bold opacity-70">Abhi tak koi course sync nahi hua hai.</div>`;
-    } else if (tab === "activity") {
-        const logs = d.logs || [];
-        body.innerHTML = logs.length ? logs.map(l => `
-            <div class="p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800/70 border border-sky-200/50 text-xs">
+            <!-- Active Token + Devices -->
+            <div class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700 space-y-2">
                 <div class="flex justify-between items-center">
-                    <span class="px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 text-[10px] font-black">${escHtml(l.action)}</span>
-                    <span class="text-[10px] opacity-65">🕒 ${escHtml(l.time_str)}</span>
+                    <span class="font-black">🔑 Student JWT Token</span>
+                    <button onclick="navigator.clipboard.writeText('${esc(u.jwt_token || "")}'); adminToast('Token Copied!','success');" class="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[10px] font-black border-0 cursor-pointer">📋 Copy</button>
                 </div>
-                <div class="font-semibold mt-1">${escHtml(l.detail)}</div>
-            </div>`).join("") : `<div class="py-8 text-center text-xs font-bold opacity-70">No activity logs yet.</div>`;
+                <div class="p-2 rounded-xl bg-white dark:bg-slate-900 font-mono text-[10px] break-all max-h-20 overflow-y-auto">${esc(u.jwt_token || "N/A")}</div>
+                <div class="font-black pt-2">📱 Tracked Devices (${(u.devices || []).length})</div>
+                <div class="space-y-1.5">${devicesHtml}</div>
+            </div>`;
     } else if (tab === "tests") {
-        const tests = d.tests || [];
-        body.innerHTML = tests.length ? tests.map(t => `
-            <div class="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-slate-800/70 border border-sky-200/60 flex flex-wrap justify-between items-center gap-2">
-                <div>
-                    <div class="font-black text-sm">${escHtml(t.test_title)}</div>
-                    <div class="text-[11px] opacity-70">✓ ${t.correct} | ✕ ${t.incorrect} | − ${t.unattempted} | 🕒 ${escHtml(t.submitted_at)}</div>
+        box.innerHTML = tests.length ? tests.map(t => {
+            const secsHtml = (t.section_stats || []).map(s => `
+                <div class="p-2 rounded-lg bg-white dark:bg-slate-900 border border-sky-200/40 text-[11px]">
+                    <div class="font-black text-indigo-700 dark:text-sky-400">${esc(s.name)}</div>
+                    <div class="font-bold opacity-80">Score: ${s.score} • Acc: ${s.accuracy}% (✓${s.correct} / ✕${s.incorrect} / −${s.unattempted})</div>
+                </div>`).join("");
+            return `
+                <div class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/50 dark:border-slate-700 space-y-2.5">
+                    <div class="flex justify-between items-start gap-2 flex-wrap">
+                        <div>
+                            <h4 class="font-black text-sm">${esc(t.test_title)}</h4>
+                            <div class="text-[11px] opacity-70 font-bold">Test #${esc(t.test_id)} • ${esc(t.submitted_at)} • ⏱ ${Math.round((t.time_taken_sec || 0) / 60)}m</div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 font-black text-xs">${t.score}/${t.max_marks} (${t.accuracy}%)</span>
+                            <button onclick="deleteLeaderboardScore('${esc(t.attempt_id)}', true)" class="px-2.5 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black border-0 cursor-pointer" title="Remove Score from Leaderboard">🗑 Remove</button>
+                        </div>
+                    </div>
+                    <div class="flex gap-3 flex-wrap font-bold text-[11px]">
+                        <span class="text-emerald-600">✓ Correct: ${t.correct}</span>
+                        <span class="text-rose-600">✕ Wrong: ${t.incorrect}</span>
+                        <span class="opacity-70">− Skipped: ${t.unattempted}</span>
+                        <span class="text-rose-700">⏳ Time-Traps: ${t.time_traps_count || 0}</span>
+                        <span class="text-amber-700">🎲 Fast Guesses: ${t.fast_guesses_count || 0}</span>
+                    </div>
+                    ${secsHtml ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">${secsHtml}</div>` : ""}
+                </div>`;
+        }).join("") : `<div class="py-10 text-center opacity-65 font-bold">Is student ne abhi tak koi mock test submit nahi kiya hai.</div>`;
+    } else if (tab === "mistakes") {
+        const mistakes = sync.mistake_bank || [];
+        box.innerHTML = mistakes.length ? mistakes.map((m, i) => `
+            <div class="p-4 rounded-2xl bg-rose-50/60 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 space-y-1.5">
+                <div class="flex justify-between font-black text-[11px]">
+                    <span class="text-rose-700">#${i + 1} • ${esc(m.subject)} • ${esc(m.testTitle)}</span>
+                    <span class="opacity-65">${esc(m.savedAt || "")}</span>
                 </div>
-                <div class="text-right">
-                    <div class="font-black text-base text-blue-600">${t.score} / ${t.max_marks}</div>
-                    <div class="text-[11px] font-extrabold text-emerald-600">🎯 ${t.accuracy}% Acc</div>
+                <div class="font-bold text-sm">${(m.questionObj && m.questionObj.question) || ""}</div>
+                <div class="text-[11px] font-extrabold text-emerald-700">Correct Option: #${esc((m.questionObj && m.questionObj.answer) || "1")} • Student Chose: #${esc(m.wrongAns || "N/A")}</div>
+            </div>`).join("") : `<div class="py-10 text-center opacity-65 font-bold">Mistake Bank is empty.</div>`;
+    } else if (tab === "bookmarks") {
+        const bms = sync.bookmarks || [];
+        box.innerHTML = bms.length ? bms.map((b, i) => `
+            <div class="p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 space-y-1.5">
+                <div class="flex justify-between font-black text-[11px]">
+                    <span class="text-amber-800">🔖 #${i + 1} • ${esc(b.subject)} • ${esc(b.testTitle)}</span>
+                    <span class="opacity-65">${esc(b.savedAt || "")}</span>
                 </div>
-            </div>`).join("") : `<div class="py-8 text-center text-xs font-bold opacity-70">Is user ne abhi koi mock test submit nahi kiya.</div>`;
+                <div class="font-bold text-sm">${(b.questionObj && b.questionObj.question) || ""}</div>
+                <div class="text-[11px] font-extrabold text-emerald-700">Correct Option: #${esc((b.questionObj && b.questionObj.answer) || "1")}</div>
+            </div>`).join("") : `<div class="py-10 text-center opacity-65 font-bold">No bookmarked questions synced yet.</div>`;
+    } else if (tab === "logs") {
+        box.innerHTML = `
+            <div class="space-y-2">
+                <div class="font-black text-sm">🔔 Sent Inbox Messages (${inbox.length})</div>
+                ${inbox.length ? inbox.map(m => `
+                    <div class="p-3 rounded-xl bg-indigo-50/70 dark:bg-slate-800 border border-indigo-200/50">
+                        <div class="flex justify-between font-black"><span>${esc(m.title)}</span><span class="opacity-60">${m.read ? "✓ Read" : "● Unread"} • ${esc(m.created_at)}</span></div>
+                        <div class="mt-1 opacity-85">${esc(m.message)}</div>
+                    </div>`).join("") : `<div class="opacity-60 font-bold">No personal messages sent yet.</div>`}
+            </div>
+            <div class="space-y-2 pt-3">
+                <div class="font-black text-sm">🔴 Recent Activity Timeline (${logs.length})</div>
+                ${logs.length ? logs.map(renderActivityRowHtml).join("") : `<div class="opacity-60 font-bold">No logs yet.</div>`}
+            </div>`;
     }
-}
+};
 
-async function toggleBlockUser(uid, shouldBlock) {
+window.adminToggleBlockUser = async function(uid, blocked) {
     let reason = "";
-    if (shouldBlock) {
-        reason = prompt("Block karne ka reason likhein (Optional):", "Policy Violation / Suspicious Activity");
-        if (reason === null) return;
+    if (blocked) {
+        reason = prompt("Block reason likhein:", "Policy violation / Suspicious activity") || "Blocked by Admin";
     }
-    const res = await adminFetch("/api/admin/user/block", {
-        method: "POST",
-        body: JSON.stringify({ user_id: uid, blocked: shouldBlock, reason })
-    });
-    if (res && res.status === "success") {
-        showToast(shouldBlock ? "🚫 User Blocked!" : "✅ User Unblocked!", shouldBlock ? "warning" : "success");
+    const res = await adminApi("/api/admin/user/block", "POST", { user_id: uid, blocked, reason });
+    if (res.ok) {
+        adminToast(blocked ? "🚫 User Blocked!" : "✅ User Unblocked!", "success");
         openUserDossier(uid);
-        if (adminState.activeTab === "users") loadUsers(adminState.userPage);
+        loadUsers(adminState.userPage);
     }
-}
+};
 
-async function promoteUserToken(uid, name, token) {
-    if (!token) return showToast("User ka JWT token empty hai.", "error");
-    const res = await adminFetch("/api/admin/tokens", {
-        method: "POST",
-        body: JSON.stringify({ user_id: uid, token, label: `Cloud #${uid} (${name})` })
-    });
-    if (res && res.status === "success") showToast("✅ Token Global Cloud Pool mein add ho gaya!", "success");
-}
+window.adminForceLogoutUser = async function(uid) {
+    if (!confirm(`User #${uid} ko sabhi devices se force logout karein?`)) return;
+    const res = await adminApi("/api/admin/user/force_logout", "POST", { user_id: uid });
+    if (res.ok) {
+        adminToast("🚪 User Force Logged Out!", "success");
+        openUserDossier(uid);
+    }
+};
+
+window.adminSetVip = async function(uid, badge) {
+    const res = await adminApi("/api/admin/user/vip", "POST", { user_id: uid, badge });
+    if (res.ok) {
+        adminToast(`⭐ Badge updated to: ${badge || "None"}`, "success");
+        openUserDossier(uid);
+    }
+};
+
+window.adminBanUserIp = async function(ip, uid) {
+    if (!confirm(`Direct IP ${ip} ko ban karein?`)) return;
+    const res = await adminApi("/api/admin/banned_ips", "POST", { ip, user_id: uid, reason: `Banned from User #${uid}` });
+    if (res.ok) adminToast(`🌐 IP ${ip} Banned!`, "success");
+};
+
+window.adminSendPersonalMsg = async function(uid) {
+    const title = document.getElementById("pmTitleInp").value.trim() || "Message from Admin";
+    const message = document.getElementById("pmBodyInp").value.trim();
+    if (!message) return adminToast("Message likhein pehle.", "warning");
+    const res = await adminApi("/api/admin/user/message", "POST", { user_id: uid, title, message });
+    if (res.ok) {
+        adminToast("🔔 Message sent to student inbox!", "success");
+        openUserDossier(uid);
+    }
+};
 
 // =========================================================
-// 3. LIVE GLOBAL ACTIVITY FEED
+// TAB 4: TOP PERFORMERS & TEST ANALYTICS + LEADERBOARD MODERATOR
 // =========================================================
-async function loadGlobalActivity() {
-    const res = await adminFetch("/api/admin/activities?limit=60");
-    if (!res || res.status !== "success") return;
-    const box = document.getElementById("globalActivityContainer");
-    const acts = res.activities || [];
-    box.innerHTML = acts.length ? acts.map(a => `
-        <div onclick="openUserDossier('${escHtml(a.user_id)}')" class="admin-glass-card p-3.5 rounded-2xl cursor-pointer hover:border-blue-500 flex flex-wrap justify-between items-center gap-2">
+async function loadAnalytics() {
+    const [topRes, testRes] = await Promise.all([
+        adminApi("/api/admin/top_performers"),
+        adminApi("/api/admin/test_analytics")
+    ]);
+
+    const tops = (topRes.data && topRes.data.performers) || [];
+    document.getElementById("topPerformersList").innerHTML = tops.length ? tops.map((p, idx) => `
+        <div onclick="openUserDossier('${esc(p.user_id)}')" class="p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 border border-sky-200/50 dark:border-slate-700 flex justify-between items-center gap-2 cursor-pointer">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="font-black text-indigo-700 w-7">${idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx + 1}`}</span>
+                <div class="min-w-0">
+                    <div class="font-black truncate">${esc(p.name)} ${esc(p.vip_badge)}</div>
+                    <div class="text-[10px] opacity-65 font-bold">UID: ${esc(p.user_id)} • ${esc(p.state || "India")} • 🔥 ${p.streak}d</div>
+                </div>
+            </div>
+            <div class="text-right shrink-0 font-black">
+                <div class="text-blue-600">${p.tests_given} Tests</div>
+                <div class="text-[10px] text-emerald-600">${p.avg_accuracy}% Acc • ${p.avg_score_pct}% Avg</div>
+            </div>
+        </div>`).join("") : `<div class="py-6 text-center opacity-65 font-bold">No test attempts yet.</div>`;
+
+    const tests = (testRes.data && testRes.data.tests) || [];
+    document.getElementById("testAnalyticsList").innerHTML = tests.length ? tests.map(t => {
+        const diffCls = t.difficulty === "Hard" ? "bg-rose-100 text-rose-800" : (t.difficulty === "Moderate" ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800");
+        return `
+            <details class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800 border border-sky-200/50 dark:border-slate-700">
+                <summary class="cursor-pointer flex justify-between items-center gap-2 flex-wrap font-black">
+                    <span>📝 ${esc(t.test_title)} (#${esc(t.test_id)})</span>
+                    <div class="flex items-center gap-2">
+                        <span class="px-2 py-0.5 rounded-full ${diffCls} text-[10px]">${t.difficulty}</span>
+                        <span class="text-blue-600">${t.attempts} Attempts • Avg ${t.avg_score}/${t.max_marks} (${t.avg_accuracy}%)</span>
+                    </div>
+                </summary>
+                <div class="mt-3 space-y-1.5 pt-2 border-t border-sky-200/40">
+                    ${(t.top_attempts || []).map((a, idx) => `
+                        <div class="p-2 rounded-lg bg-white dark:bg-slate-900 flex justify-between items-center gap-2">
+                            <span><strong>#${idx + 1}</strong> ${esc(a.user_name)} (UID: ${esc(a.user_id)}) — <strong>${a.score}</strong> (${a.accuracy}%)</span>
+                            <button onclick="deleteLeaderboardScore('${esc(a.attempt_id)}', false)" class="px-2 py-1 rounded bg-rose-600 text-white text-[10px] font-black border-0 cursor-pointer">🗑 Delete</button>
+                        </div>`).join("")}
+                </div>
+            </details>`;
+    }).join("") : `<div class="py-6 text-center opacity-65 font-bold">No test analytics yet.</div>`;
+}
+
+window.deleteLeaderboardScore = async function(attemptId, fromDossier = false) {
+    if (!confirm("Is score ko Leaderboard se permanently delete karein?")) return;
+    const res = await adminApi(`/api/admin/test_attempt/${encodeURIComponent(attemptId)}`, "DELETE");
+    if (res.ok) {
+        adminToast("🗑 Score removed from Leaderboard!", "success");
+        if (fromDossier && adminState.currentDossier) openUserDossier(adminState.currentDossier.user.user_id);
+        else loadAnalytics();
+    }
+};
+
+// =========================================================
+// TAB 5: CLOUD TOKEN POOL + DEAD TOKEN SCANNER
+// =========================================================
+async function loadCloudTokens() {
+    const res = await adminApi("/api/admin/tokens");
+    const list = (res.data && res.data.tokens) || [];
+    document.getElementById("cloudTokensGrid").innerHTML = list.length ? list.map((t, i) => `
+        <div class="admin-glass p-4 rounded-2xl flex flex-wrap justify-between items-center gap-3 text-xs">
             <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <span class="px-2 py-0.5 rounded bg-blue-100 text-blue-800 text-[10px] font-black">${escHtml(a.action)}</span>
-                    <span class="font-black text-sm">${escHtml(a.user_name)}</span>
-                    <span class="text-xs opacity-65 font-mono">#${escHtml(a.user_id)} (${escHtml(a.db_shard)})</span>
+                    <span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black">POOL #${i + 1}</span>
+                    <span class="px-2 py-0.5 rounded-full ${t.is_expired ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"} text-[10px] font-black">${t.is_expired ? "⚠️ EXPIRED" : "✅ LIVE"}</span>
+                    <span class="font-black">${esc(t.owner_name)} (UID: ${esc(t.userId)})</span>
+                    <span class="opacity-60 font-bold text-[10px]">[${esc(t.source)}]</span>
                 </div>
-                <div class="text-xs opacity-85 mt-1">${escHtml(a.detail)}</div>
+                <div class="font-mono text-[10px] opacity-70 truncate mt-1">${esc(t.token)}</div>
+                <div class="text-[10px] font-bold text-sky-700 dark:text-sky-400 mt-0.5">Public Display: "Cloud Server" • Added: ${esc(t.added_at)}</div>
             </div>
-            <div class="text-[11px] font-bold opacity-65 shrink-0">🕒 ${escHtml(a.time_str)}</div>
-        </div>`).join("") : `<div class="admin-glass-card p-8 rounded-3xl text-center text-xs font-bold opacity-70">No activity yet.</div>`;
+            <button onclick="deletePoolToken('${esc(t.token)}', '${esc(t.userId)}')" class="px-3.5 py-2 rounded-xl bg-rose-600 text-white font-extrabold text-xs border-0 cursor-pointer shrink-0">🗑 Remove</button>
+        </div>`).join("") : `<div class="admin-glass p-8 text-center text-xs font-bold opacity-70">Cloud Token Pool abhi khaali hai.</div>`;
 }
 
-function toggleAutoRefreshActivity() {
-    const on = document.getElementById("autoRefreshActToggle").checked;
-    if (adminState.activityTimer) clearInterval(adminState.activityTimer);
-    if (on) {
-        adminState.activityTimer = setInterval(() => {
-            if (adminState.activeTab === "activity") loadGlobalActivity();
-        }, 15000);
-        showToast("🔄 Auto-Refresh ON (15s)", "info");
+window.addManualPoolToken = async function() {
+    const user_id = document.getElementById("newPoolUid").value.trim();
+    const label = document.getElementById("newPoolLabel").value.trim() || "Manual Cloud";
+    const token = document.getElementById("newPoolToken").value.trim();
+    if (!token) return adminToast("JWT token paste karein.", "warning");
+    const res = await adminApi("/api/admin/tokens", "POST", { user_id, label, token });
+    if (res.ok) {
+        document.getElementById("newPoolUid").value = "";
+        document.getElementById("newPoolLabel").value = "";
+        document.getElementById("newPoolToken").value = "";
+        adminToast("✅ Token added to Cloud Pool!", "success");
+        loadCloudTokens();
     }
-}
+};
 
-// =========================================================
-// 4. CLOUD TOKEN POOL
-// =========================================================
-async function loadTokenPool() {
-    const res = await adminFetch("/api/admin/tokens");
-    if (!res || res.status !== "success") return;
-    const toks = res.tokens || [];
-    document.getElementById("poolCountSpan").textContent = toks.length;
-    document.getElementById("tokenPoolList").innerHTML = toks.length ? toks.map((t, i) => `
-        <div class="p-3.5 rounded-2xl bg-sky-50/70 dark:bg-slate-800/70 border border-sky-200/60 flex flex-wrap justify-between items-center gap-3">
-            <div class="min-w-0 flex-1">
-                <div class="font-black text-sm">#${i + 1} • ${escHtml(t.label)} <span class="text-xs font-mono opacity-70">(UID: ${escHtml(t.userId)})</span></div>
-                <div class="font-mono text-[11px] opacity-70 truncate mt-0.5">${escHtml(t.token)}</div>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="navigator.clipboard.writeText('${escHtml(t.token)}'); showToast('Token Copied!', 'success');" class="admin-btn-soft text-xs">📋 Copy</button>
-                <button onclick="deletePoolToken('${escHtml(t.userId)}', '${escHtml(t.token)}')" class="px-3 py-1.5 rounded-xl bg-rose-600 text-white font-extrabold text-xs border-0 cursor-pointer">🗑 Delete</button>
-            </div>
-        </div>`).join("") : `<div class="text-xs opacity-70 py-4 text-center">Pool mein koi token nahi hai.</div>`;
-}
-
-async function addTokenToPool() {
-    const uid = document.getElementById("poolUidInput").value.trim();
-    const label = document.getElementById("poolLabelInput").value.trim();
-    const token = document.getElementById("poolJwtInput").value.trim();
-    if (!uid || !token) return showToast("User ID aur JWT Token dono dalein.", "warning");
-
-    const res = await adminFetch("/api/admin/tokens", {
-        method: "POST",
-        body: JSON.stringify({ user_id: uid, label: label || `Cloud #${uid}`, token })
-    });
-    if (res && res.status === "success") {
-        document.getElementById("poolUidInput").value = "";
-        document.getElementById("poolLabelInput").value = "";
-        document.getElementById("poolJwtInput").value = "";
-        showToast("✅ Token Cloud Pool mein save ho gaya!", "success");
-        loadTokenPool();
+window.deletePoolToken = async function(token, uid) {
+    if (!confirm(`UID #${uid} ka token Cloud Pool se hatayein? (Yeh auto-readd nahi hoga)`)) return;
+    const res = await adminApi("/api/admin/tokens", "DELETE", { token, user_id: uid });
+    if (res.ok) {
+        adminToast("🗑 Token removed from Cloud Pool!", "success");
+        loadCloudTokens();
     }
-}
+};
 
-async function deletePoolToken(uid, token) {
-    if (!confirm(`Delete token for UID ${uid}?`)) return;
-    const res = await adminFetch("/api/admin/tokens", {
-        method: "DELETE",
-        body: JSON.stringify({ user_id: uid, token })
-    });
-    if (res && res.status === "success") {
-        showToast("🗑 Token Deleted!", "info");
-        loadTokenPool();
+window.cleanDeadCloudTokens = async function() {
+    const res = await adminApi("/api/admin/tokens/clean_dead", "POST", {});
+    if (res.ok) {
+        adminToast(`🧹 Removed ${res.data.removed} dead tokens! (${res.data.kept} live remaining)`, "success");
+        loadCloudTokens();
     }
-}
+};
 
 // =========================================================
-// 5. PORTAL CONTROLS (MAINTENANCE + ALERTS)
+// TAB 6: CONTENT HUB (NOTICES, BROADCAST, CA, QUIZ, SCHEDULED MOCKS)
 // =========================================================
-async function loadControlsTab() {
-    const res = await adminFetch("/api/admin/settings");
-    if (!res || res.status !== "success") return;
-    const cfg = res.settings || {};
-    document.getElementById("ctrlMaintToggle").checked = Boolean(cfg.maintenance_mode);
-    document.getElementById("ctrlMaintMsg").value = cfg.maintenance_message || "";
-    document.getElementById("ctrlLoginAlertToggle").checked = Boolean(cfg.login_alerts);
-    document.getElementById("ctrlTestAlertToggle").checked = Boolean(cfg.test_submit_alerts);
-    document.getElementById("maintHeaderBadge").classList.toggle("hidden", !cfg.maintenance_mode);
+async function loadContentHub() {
+    const [notRes, caRes, dqRes, schRes] = await Promise.all([
+        adminApi("/api/admin/notices"),
+        adminApi("/api/admin/ca_capsules"),
+        adminApi("/api/admin/daily_quiz"),
+        adminApi("/api/admin/scheduled_mocks")
+    ]);
+
+    const notices = (notRes.data && notRes.data.notices) || [];
+    document.getElementById("noticesListBox").innerHTML = notices.map(n => `
+        <div class="p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 flex justify-between items-start gap-2">
+            <div><div class="font-black">${esc(n.title)} <span class="text-[10px] opacity-60">(${esc(n.level)})</span></div><div class="opacity-80">${esc(n.message)}</div></div>
+            <button onclick="deleteNotice('${esc(n.notice_id)}')" class="text-rose-600 font-black bg-transparent border-0 cursor-pointer">✕</button>
+        </div>`).join("") || `<div class="opacity-60 font-bold">No active notices.</div>`;
+
+    const cas = (caRes.data && caRes.data.capsules) || [];
+    document.getElementById("caCapsulesAdminList").innerHTML = cas.map(c => `
+        <div class="p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 flex justify-between items-start gap-2">
+            <div><div class="font-black">📰 ${esc(c.title)} <span class="text-[10px] text-blue-600">[${esc(c.category)} • ${esc(c.date)}]</span></div><div class="opacity-75 mt-1">${(c.points || []).length} points</div></div>
+            <button onclick="deleteCaCapsule('${esc(c.capsule_id)}')" class="text-rose-600 font-black bg-transparent border-0 cursor-pointer">✕</button>
+        </div>`).join("") || `<div class="opacity-60 font-bold">No CA capsules published yet.</div>`;
+
+    const dq = dqRes.data && dqRes.data.quiz;
+    if (dq && dq.questions) {
+        document.getElementById("dqTitle").value = dq.title || "Daily 5-Min Rapid Quiz";
+        document.getElementById("dqJson").value = JSON.stringify(dq.questions, null, 2);
+    }
+
+    const schs = (schRes.data && schRes.data.mocks) || [];
+    document.getElementById("scheduledMocksList").innerHTML = schs.map(s => `
+        <div class="p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 flex justify-between items-center gap-2">
+            <div><div class="font-black">🗓️ ${esc(s.title)}</div><div class="opacity-70 text-[10px]">Series #${esc(s.series_id)} • Test #${esc(s.test_id)} • Start: ${esc(s.start_time)}</div></div>
+            <button onclick="deleteScheduledMock('${esc(s.sched_id)}')" class="text-rose-600 font-black bg-transparent border-0 cursor-pointer">✕</button>
+        </div>`).join("") || `<div class="opacity-60 font-bold">No scheduled mocks.</div>`;
 }
 
-async function savePortalControls() {
+window.publishNotice = async function() {
+    const title = document.getElementById("notTitle").value.trim();
+    const message = document.getElementById("notMsg").value.trim();
+    const level = document.getElementById("notLevel").value;
+    if (!title || !message) return adminToast("Title & message required.", "warning");
+    const res = await adminApi("/api/admin/notices", "POST", { title, message, level });
+    if (res.ok) {
+        document.getElementById("notTitle").value = "";
+        document.getElementById("notMsg").value = "";
+        adminToast("📢 Notice Published!", "success");
+        loadContentHub();
+    }
+};
+window.deleteNotice = async function(nid) {
+    const res = await adminApi(`/api/admin/notices/${encodeURIComponent(nid)}`, "DELETE");
+    if (res.ok) { adminToast("🗑 Notice deleted.", "info"); loadContentHub(); }
+};
+
+window.sendTargetedBroadcast = async function() {
+    const target_group = document.getElementById("bcGroup").value;
+    const state_filter = document.getElementById("bcStateInp").value.trim();
+    const title = document.getElementById("bcTitle").value.trim();
+    const message = document.getElementById("bcMsg").value.trim();
+    if (!title || !message) return adminToast("Title & message required.", "warning");
+    const res = await adminApi("/api/admin/broadcast", "POST", { target_group, state_filter, title, message });
+    if (res.ok) {
+        document.getElementById("bcTitle").value = "";
+        document.getElementById("bcMsg").value = "";
+        adminToast(`🚀 Broadcast sent to ${res.data.sent_count} students!`, "success");
+    }
+};
+
+window.publishCaCapsule = async function() {
+    const title = document.getElementById("caTitle").value.trim();
+    const category = document.getElementById("caCat").value.trim() || "Current Affairs";
+    const points = document.getElementById("caPoints").value.split("\n").map(x => x.trim()).filter(Boolean);
+    if (!title || !points.length) return adminToast("Title aur kam se kam 1 point likhein.", "warning");
+    const res = await adminApi("/api/admin/ca_capsules", "POST", { title, category, points });
+    if (res.ok) {
+        document.getElementById("caTitle").value = "";
+        document.getElementById("caPoints").value = "";
+        adminToast("📰 CA Capsule Published!", "success");
+        loadContentHub();
+    }
+};
+window.deleteCaCapsule = async function(cid) {
+    const res = await adminApi(`/api/admin/ca_capsules/${encodeURIComponent(cid)}`, "DELETE");
+    if (res.ok) { adminToast("🗑 Capsule removed.", "info"); loadContentHub(); }
+};
+
+window.publishDailyQuiz = async function() {
+    const title = document.getElementById("dqTitle").value.trim() || "Daily 5-Min Rapid Quiz";
+    try {
+        const questions = JSON.parse(document.getElementById("dqJson").value);
+        if (!Array.isArray(questions) || !questions.length) throw new Error();
+        const res = await adminApi("/api/admin/daily_quiz", "POST", { title, questions });
+        if (res.ok) adminToast(`⚡ Published ${questions.length} Daily Quiz questions!`, "success");
+    } catch {
+        adminToast("Invalid JSON format! Example: [{\"q\":\"...\",\"opts\":[\"A\",\"B\",\"C\",\"D\"],\"ans\":0,\"exp\":\"...\"}]", "error");
+    }
+};
+
+window.publishScheduledMock = async function() {
     const payload = {
-        maintenance_mode: document.getElementById("ctrlMaintToggle").checked,
-        maintenance_message: document.getElementById("ctrlMaintMsg").value.trim(),
-        login_alerts: document.getElementById("ctrlLoginAlertToggle").checked,
-        test_submit_alerts: document.getElementById("ctrlTestAlertToggle").checked
+        title: document.getElementById("schTitle").value.trim(),
+        series_id: document.getElementById("schSeriesId").value.trim(),
+        test_id: document.getElementById("schTestId").value.trim(),
+        start_time: document.getElementById("schStart").value,
+        result_time: document.getElementById("schResult").value
     };
-    const res = await adminFetch("/api/admin/settings", {
-        method: "POST",
-        body: JSON.stringify(payload)
-    });
-    if (res && res.status === "success") {
-        document.getElementById("maintHeaderBadge").classList.toggle("hidden", !payload.maintenance_mode);
-        showToast("✅ Portal Controls Saved Live!", "success");
+    if (!payload.title || !payload.test_id) return adminToast("Title & Test ID required.", "warning");
+    const res = await adminApi("/api/admin/scheduled_mocks", "POST", payload);
+    if (res.ok) {
+        adminToast("🗓️ Scheduled Mock Published!", "success");
+        loadContentHub();
     }
-}
+};
+window.deleteScheduledMock = async function(sid) {
+    const res = await adminApi(`/api/admin/scheduled_mocks/${encodeURIComponent(sid)}`, "DELETE");
+    if (res.ok) { adminToast("🗑 Schedule deleted.", "info"); loadContentHub(); }
+};
 
 // =========================================================
-// 6. NOTICE BOARD
+// TAB 7: KILL-SWITCHES, APP VERSION & PROMO POPUP
 // =========================================================
-async function loadNoticesTab() {
-    const res = await adminFetch("/api/admin/notices");
-    if (!res || res.status !== "success") return;
-    const list = res.notices || [];
-    document.getElementById("noticesListContainer").innerHTML = list.length ? list.map(n => `
-        <div class="admin-glass-card p-4 rounded-2xl flex flex-col justify-between gap-3">
-            <div>
-                <div class="flex justify-between items-center">
-                    <span class="px-2 py-0.5 rounded bg-sky-100 text-sky-900 text-[10px] font-black uppercase">${escHtml(n.level)}</span>
-                    <span class="text-[10px] opacity-65">🕒 ${escHtml(n.created_at)}</span>
-                </div>
-                <h4 class="font-black text-base mt-2">${escHtml(n.title)}</h4>
-                <p class="text-xs opacity-80 mt-1">${escHtml(n.message)}</p>
-            </div>
-            <button onclick="deleteNoticeItem('${escHtml(n.notice_id)}')" class="self-end px-3 py-1.5 rounded-xl bg-rose-600 text-white font-extrabold text-xs border-0 cursor-pointer">🗑 Delete Notice</button>
-        </div>`).join("") : `<div class="col-span-full admin-glass-card p-8 rounded-3xl text-center text-xs font-bold opacity-70">Koi active notice nahi hai.</div>`;
+async function loadControls() {
+    const res = await adminApi("/api/admin/settings");
+    if (!res.ok || !res.data.settings) return;
+    const s = res.data.settings;
+    const ks = s.kill_switches || {};
+    const pp = s.promo_popup || {};
+
+    document.getElementById("fullControlsBox").innerHTML = `
+        <div>
+            <label class="font-extrabold">🔄 App Cache Version (Badhane par sabhi students ka cache force refresh hoga)</label>
+            <input id="ctrlAppVersion" type="text" value="${esc(s.app_version || "v3.0")}" class="admin-input mt-1">
+        </div>
+        <div>
+            <label class="font-extrabold">🚧 Maintenance Message</label>
+            <input id="ctrlMaintMsg" type="text" value="${esc(s.maintenance_message || "")}" class="admin-input mt-1">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">🚧 Maintenance Mode</span><input id="ctrlMaintMode" type="checkbox" ${s.maintenance_mode ? "checked" : ""} class="w-4 h-4 accent-rose-600"></label>
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">📱 Single-Device Guard</span><input id="ctrlSingleDev" type="checkbox" ${s.single_device_guard ? "checked" : ""} class="w-4 h-4 accent-blue-600"></label>
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">📲 Allow New Logins</span><input id="ksNewLogin" type="checkbox" ${ks.new_login !== false ? "checked" : ""} class="w-4 h-4 accent-emerald-600"></label>
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">🏆 Paid Test Series Module</span><input id="ksPaidTs" type="checkbox" ${ks.paid_test_series !== false ? "checked" : ""} class="w-4 h-4 accent-emerald-600"></label>
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">📄 PDF Viewer Module</span><input id="ksPdf" type="checkbox" ${ks.pdf_viewer !== false ? "checked" : ""} class="w-4 h-4 accent-emerald-600"></label>
+            <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer"><span class="font-black">🧠 Pro Vault Module</span><input id="ksVault" type="checkbox" ${ks.pro_vault !== false ? "checked" : ""} class="w-4 h-4 accent-emerald-600"></label>
+        </div>
+        <button onclick="saveFullControls()" class="admin-btn-primary w-full py-2.5 text-xs">💾 Save All Switches & Version</button>`;
+
+    document.getElementById("promoEnabled").checked = Boolean(pp.enabled);
+    document.getElementById("promoTitle").value = pp.title || "";
+    document.getElementById("promoMsg").value = pp.message || "";
+    document.getElementById("promoImg").value = pp.image_url || "";
+    document.getElementById("promoBtnTxt").value = pp.btn_text || "Open Now";
+    document.getElementById("promoBtnUrl").value = pp.btn_url || "";
 }
 
-async function publishNotice() {
-    const title = document.getElementById("noticeTitleInput").value.trim();
-    const message = document.getElementById("noticeMsgInput").value.trim();
-    const level = document.getElementById("noticeLevelInput").value;
-    if (!title || !message) return showToast("Title aur Message dono dalein.", "warning");
-
-    const res = await adminFetch("/api/admin/notices", {
-        method: "POST",
-        body: JSON.stringify({ title, message, level })
-    });
-    if (res && res.status === "success") {
-        document.getElementById("noticeTitleInput").value = "";
-        document.getElementById("noticeMsgInput").value = "";
-        showToast("📢 Live Notice Published!", "success");
-        loadNoticesTab();
-    }
-}
-
-async function deleteNoticeItem(nid) {
-    const res = await adminFetch(`/api/admin/notices/${encodeURIComponent(nid)}`, { method: "DELETE" });
-    if (res && res.status === "success") {
-        showToast("🗑 Notice Deleted.", "info");
-        loadNoticesTab();
-    }
-}
-
-// =========================================================
-// 7. REPORTS & 8. ERROR LOGS & 9. BACKUP
-// =========================================================
-async function loadReportsTab() {
-    const res = await adminFetch("/api/admin/reports");
-    if (!res || res.status !== "success") return;
-    const reps = res.reports || [];
-    document.getElementById("reportsListContainer").innerHTML = reps.length ? reps.map(r => {
-        const resolved = r.status === "RESOLVED";
-        return `
-            <div class="admin-glass-card p-4 rounded-2xl space-y-2">
-                <div class="flex justify-between items-center">
-                    <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black ${resolved ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"}">${escHtml(r.status)}</span>
-                    <span class="text-[10px] opacity-65">🕒 ${escHtml(r.created_at)}</span>
-                </div>
-                <div class="font-black text-sm">[${escHtml(r.type)}] ${escHtml(r.subject)}</div>
-                <div class="text-xs opacity-85">${escHtml(r.message)}</div>
-                <div class="text-[11px] opacity-70 font-mono">👤 ${escHtml(r.user_name)} (#${escHtml(r.user_id)}) • 📱 ${escHtml(r.phone)}</div>
-                ${!resolved ? `<button onclick="resolveReportItem('${escHtml(r.report_id)}')" class="admin-btn-primary px-4 py-1.5 text-xs">✅ Mark Resolved</button>` : ""}
-            </div>`;
-    }).join("") : `<div class="col-span-full admin-glass-card p-8 rounded-3xl text-center text-xs font-bold opacity-70">Koi report nahi hai.</div>`;
-}
-
-async function resolveReportItem(rid) {
-    const res = await adminFetch(`/api/admin/reports/${encodeURIComponent(rid)}/resolve`, { method: "POST" });
-    if (res && res.status === "success") {
-        showToast("✅ Report Marked Resolved!", "success");
-        loadReportsTab();
-    }
-}
-
-async function loadErrorsTab() {
-    const res = await adminFetch("/api/admin/errors");
-    if (!res || res.status !== "success") return;
-    const errs = res.errors || [];
-    document.getElementById("errorLogsContainer").innerHTML = errs.length ? errs.map(e => `
-        <div class="admin-glass-card p-4 rounded-2xl border-l-4 border-l-rose-500">
-            <div class="flex justify-between items-center text-xs">
-                <span class="font-black text-rose-600">[${escHtml(e.source)}] UID: ${escHtml(e.user_id)}</span>
-                <span class="opacity-65">🕒 ${escHtml(e.time_str)}</span>
-            </div>
-            <div class="text-xs font-bold mt-1">${escHtml(e.message)}</div>
-            ${e.stack ? `<pre class="mt-2 p-2 rounded-xl bg-slate-900 text-rose-300 text-[10px] overflow-x-auto">${escHtml(e.stack)}</pre>` : ""}
-        </div>`).join("") : `<div class="admin-glass-card p-8 rounded-3xl text-center text-xs font-bold text-emerald-600">🟢 Koi error log nahi hai — Sab smooth chal raha hai!</div>`;
-}
-
-async function clearAllErrorLogs() {
-    if (!confirm("Saare error logs delete kar dein?")) return;
-    const res = await adminFetch("/api/admin/errors", { method: "DELETE" });
-    if (res && res.status === "success") {
-        showToast("🗑 Error Logs Cleared!", "info");
-        loadErrorsTab();
-    }
-}
-
-async function downloadFullBackup() {
-    showToast("⏳ Chaaron DBs ka full backup taiyaar ho raha hai...", "info");
-    const data = await adminFetch("/api/admin/backup");
-    if (data && data.shards) {
-        downloadJsonFile(data, `RWA_4DB_Cluster_Backup_${Date.now()}.json`);
-        showToast("✅ Backup Download Started!", "success");
-    }
-}
-
-function downloadJsonFile(obj, filename) {
-    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-}
-
-// =========================================================
-// AUTO-START ON PAGE LOAD
-// =========================================================
-(async function initAdminPanel() {
-    if (localStorage.getItem("rwa_admin_dark") === "1") {
-        document.body.classList.add("dark-mode");
-        const tb = document.getElementById("themeToggleBtn");
-        if (tb) tb.textContent = "☀️ Asmani Sky Mode";
-    }
-    document.getElementById("adminServerInput").value = ADMIN_API_BASE;
-
-    if (ADMIN_KEY) {
-        const res = await adminFetch("/api/admin/auth", { method: "POST" });
-        if (res && res.status === "success") {
-            document.getElementById("adminLoginOverlay").classList.add("hidden");
-            document.getElementById("adminShell").classList.remove("hidden");
-            switchAdminTab("dashboard");
+window.saveFullControls = async function() {
+    const payload = {
+        app_version: document.getElementById("ctrlAppVersion").value.trim() || "v3.0",
+        maintenance_message: document.getElementById("ctrlMaintMsg").value.trim(),
+        maintenance_mode: document.getElementById("ctrlMaintMode").checked,
+        single_device_guard: document.getElementById("ctrlSingleDev").checked,
+        kill_switches: {
+            new_login: document.getElementById("ksNewLogin").checked,
+            paid_test_series: document.getElementById("ksPaidTs").checked,
+            pdf_viewer: document.getElementById("ksPdf").checked,
+            pro_vault: document.getElementById("ksVault").checked
         }
+    };
+    const res = await adminApi("/api/admin/settings", "POST", payload);
+    if (res.ok) adminToast("✅ Portal Controls & Kill-Switches Saved!", "success");
+};
+
+window.savePromoPopupSettings = async function() {
+    const promo_popup = {
+        enabled: document.getElementById("promoEnabled").checked,
+        title: document.getElementById("promoTitle").value.trim(),
+        message: document.getElementById("promoMsg").value.trim(),
+        image_url: document.getElementById("promoImg").value.trim(),
+        btn_text: document.getElementById("promoBtnTxt").value.trim() || "Open Now",
+        btn_url: document.getElementById("promoBtnUrl").value.trim()
+    };
+    const res = await adminApi("/api/admin/settings", "POST", { promo_popup });
+    if (res.ok) adminToast("🎁 Promo Popup Updated!", "success");
+};
+
+// =========================================================
+// TAB 8: 2-WAY USER REPORTS
+// =========================================================
+async function loadReports() {
+    const res = await adminApi("/api/admin/reports");
+    const reps = (res.data && res.data.reports) || [];
+    document.getElementById("reportsListBox").innerHTML = reps.length ? reps.map(r => `
+        <div class="p-4 rounded-2xl bg-sky-50/70 dark:bg-slate-800 border border-sky-200/50 dark:border-slate-700 space-y-2">
+            <div class="flex justify-between items-start gap-2 flex-wrap">
+                <div>
+                    <span class="px-2 py-0.5 rounded-full ${r.status === "RESOLVED" ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"} text-[10px] font-black">${esc(r.status)}</span>
+                    <span class="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black ml-1">${esc(r.type)}</span>
+                    <strong class="ml-1.5 text-sm">${esc(r.subject)}</strong>
+                </div>
+                <span class="opacity-60 font-bold text-[10px]">${esc(r.created_at)}</span>
+            </div>
+            <div class="font-bold opacity-85">${esc(r.message)}</div>
+            <div class="text-[11px] opacity-70 font-bold">
+                Student: <span class="underline cursor-pointer text-blue-600" onclick="openUserDossier('${esc(r.user_id)}')">${esc(r.user_name)} (UID: ${esc(r.user_id)})</span>
+                ${r.question_id ? ` • Question ID: <strong>${esc(r.question_id)}</strong> (Test #${esc(r.test_id)})` : ""}
+            </div>
+            ${r.status === "RESOLVED"
+                ? `<div class="p-2 rounded-xl bg-emerald-50 text-emerald-800 font-bold">✅ Admin Reply: ${esc(r.admin_reply)}</div>`
+                : `<div class="flex gap-2 pt-1">
+                    <input id="repReply_${esc(r.report_id)}" type="text" placeholder="Reply likhein (student ke bell inbox mein jayega)..." class="admin-input flex-1">
+                    <button onclick="replyResolveReport('${esc(r.report_id)}')" class="px-4 py-2 rounded-xl bg-emerald-600 text-white font-extrabold border-0 cursor-pointer shrink-0">📨 Reply & Resolve</button>
+                   </div>`}
+        </div>`).join("") : `<div class="py-8 text-center opacity-65 font-bold">No reports found.</div>`;
+}
+
+window.replyResolveReport = async function(rid) {
+    const reply = (document.getElementById(`repReply_${rid}`)?.value || "").trim() || "Aapki problem fix kar di gayi hai!";
+    const res = await adminApi(`/api/admin/reports/${encodeURIComponent(rid)}/resolve`, "POST", { reply });
+    if (res.ok) {
+        adminToast("📨 Reply sent to student inbox & resolved!", "success");
+        loadReports();
     }
-})();
+};
+
+// =========================================================
+// TAB 9: SECURITY, DIAGNOSTICS, IP BAN, ERRORS, AUDIT & EXPORTS
+// =========================================================
+async function loadSecurityTab() {
+    const [ipRes, errRes, audRes] = await Promise.all([
+        adminApi("/api/admin/banned_ips"),
+        adminApi("/api/admin/errors"),
+        adminApi("/api/admin/audit_logs")
+    ]);
+
+    const ips = (ipRes.data && ipRes.data.ips) || [];
+    document.getElementById("bannedIpsList").innerHTML = ips.length ? ips.map(x => `
+        <div class="p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 flex justify-between items-center">
+            <div><strong class="font-mono">${esc(x.ip)}</strong> — ${esc(x.reason)} <span class="opacity-60">(${esc(x.banned_at)})</span></div>
+            <button onclick="unbanIp('${esc(x.ip)}')" class="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-[10px] font-black border-0 cursor-pointer">Unban</button>
+        </div>`).join("") : `<div class="opacity-60 font-bold">No banned IPs.</div>`;
+
+    const errs = (errRes.data && errRes.data.errors) || [];
+    document.getElementById("errorLogsBox").innerHTML = errs.length ? errs.map(e => `
+        <div class="p-2.5 rounded-xl bg-rose-50/70 dark:bg-slate-800 border border-rose-200/50">
+            <div class="flex justify-between font-black text-rose-700"><span>${esc(e.source)} (${esc(e.user_id)})</span><span class="opacity-60">${esc(e.time_str)}</span></div>
+            <div class="mt-0.5 break-all opacity-85">${esc(e.message)}</div>
+        </div>`).join("") : `<div class="opacity-60 font-bold">Zero errors logged! 🎉</div>`;
+
+    const auds = (audRes.data && audRes.data.logs) || [];
+    document.getElementById("auditLogsBox").innerHTML = auds.length ? auds.map(a => `
+        <div class="p-2.5 rounded-xl bg-sky-50/70 dark:bg-slate-800 border border-sky-200/40">
+            <div class="flex justify-between font-black"><span>${esc(a.action)}</span><span class="opacity-60">${esc(a.time_str)}</span></div>
+            <div class="opacity-80 mt-0.5">${esc(a.detail)}</div>
+        </div>`).join("") : `<div class="opacity-60 font-bold">No audit records yet.</div>`;
+}
+
+window.runDiagnostics = async function() {
+    const box = document.getElementById("diagnosticsBox");
+    box.innerHTML = `🔄 Pinging all 4 MongoDB Shards, Cloudflare Worker & RWA API...`;
+    const res = await adminApi("/api/admin/diagnostics");
+    if (!res.ok || !res.data.diag) { box.textContent = "Diagnostics failed."; return; }
+    const d = res.data.diag;
+    const rows = [...(d.shards || []), ...(d.externals || [])];
+    box.innerHTML = `
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            ${rows.map(r => `
+                <div class="p-3 rounded-xl border ${r.ok ? "bg-emerald-50 border-emerald-300 text-emerald-900" : "bg-rose-50 border-rose-300 text-rose-900"}">
+                    <div class="font-black">${r.ok ? "🟢" : "🔴"} ${esc(r.name)}</div>
+                    <div class="text-[11px] font-bold mt-0.5">${r.ok ? `Latency: ${r.latency_ms} ms ${r.size_mb !== undefined ? `• ${r.size_mb} MB` : ""}` : esc(r.error || "Offline")}</div>
+                </div>`).join("")}
+        </div>
+        <div class="text-[10px] opacity-65 mt-2">Checked at: ${esc(d.checked_at)} • Strict Shield: ${d.strict_security ? "ON" : "OFF"}</div>`;
+};
+
+window.banIpManual = async function() {
+    const ip = document.getElementById("banIpInput").value.trim();
+    const reason = document.getElementById("banIpReason").value.trim() || "Manual IP Ban";
+    if (!ip) return adminToast("IP address dalein.", "warning");
+    const res = await adminApi("/api/admin/banned_ips", "POST", { ip, reason });
+    if (res.ok) {
+        document.getElementById("banIpInput").value = "";
+        adminToast(`🚫 IP ${ip} Banned!`, "success");
+        loadSecurityTab();
+    }
+};
+
+window.unbanIp = async function(ip) {
+    const res = await adminApi("/api/admin/banned_ips", "DELETE", { ip });
+    if (res.ok) { adminToast(`✅ IP ${ip} Unbanned!`, "success"); loadSecurityTab(); }
+};
+
+window.clearErrorLogs = async function() {
+    if (!confirm("Sabhi error logs clear karein?")) return;
+    const res = await adminApi("/api/admin/errors", "DELETE");
+    if (res.ok) { adminToast("🗑 Error logs cleared.", "info"); loadSecurityTab(); }
+};
+
+window.exportUsersCsvFile = async function() {
+    const res = await adminApi("/api/admin/export_csv");
+    if (!res.ok || !res.data.csv) return adminToast("Export failed.", "error");
+    const blob = new Blob([res.data.csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `rwa_users_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    adminToast("📊 Users CSV Downloaded!", "success");
+};
+
+window.downloadClusterBackup = async function() {
+    const res = await adminApi("/api/admin/backup");
+    if (!res.ok) return adminToast("Backup failed.", "error");
+    const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `rwa_4db_encrypted_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    adminToast("💾 Encrypted 4-DB Backup Downloaded!", "success");
+};
+
+// AUTO-UNLOCK IF VALID SHORT-LIVED SESSION EXISTS
+if (adminState.token) {
+    showAdminWorkspace();
+}
