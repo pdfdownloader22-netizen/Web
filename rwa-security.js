@@ -7,8 +7,8 @@
 
 (function initRwaSecurityShield() {
     // IMPORTANT: Yeh dono keys aapke Render backend (config.py / Environment) se EXACT match honi chahiye
-    const RWA_SIGNING_SECRET = "RWA_HMAC_SHIELD_2026_ULTRA_KEY_99";
-    const RWA_TRANSPORT_AES_KEY = "RWA_E2E_AES256_TUNNEL_2026_KEY_77";
+    const RWA_SIGNING_SECRET = "RWA_HMAC_SHIELD_2026_ULTRA_KEY_22";
+    const RWA_TRANSPORT_AES_KEY = "RWA_E2E_AES256_TUNNEL_2026_KEY_22";
 
     // Stable Device ID for Single-Device / Anti-Account Sharing Guard
     function getOrCreateDeviceId() {
