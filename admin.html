@@ -1,315 +1,415 @@
 <!doctype html>
-<html lang="hi">
+<html lang="en">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-    <title>RWA Sky Pro - Master Admin Control Panel</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <title>RWA Ultra-Pro Command Center | 4-MongoDB Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
     <link rel="stylesheet" href="admin.css">
 </head>
-<body class="min-h-screen flex flex-col">
+<body class="min-h-screen">
 
-    <!-- TOAST CONTAINER -->
-    <div id="toastStack" class="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-xs w-full pointer-events-none"></div>
+    <!-- TOAST STACK -->
+    <div id="adminToastStack" class="fixed top-4 right-4 z-[99999] flex flex-col gap-2 max-w-xs w-full pointer-events-none"></div>
 
-    <!-- ADMIN LOGIN OVERLAY -->
-    <div id="adminLoginOverlay" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
-        <div class="admin-glass-card max-w-md w-full p-6 rounded-3xl shadow-2xl">
-            <div class="flex items-center gap-3 pb-4 mb-4 border-b border-sky-200/60">
-                <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-black text-2xl flex items-center justify-center shadow-lg">🛡️</div>
-                <div>
-                    <h1 class="text-xl font-black text-slate-900 dark:text-white leading-tight">RWA Master Admin</h1>
-                    <p class="text-xs font-bold text-sky-700 dark:text-sky-300">4-MongoDB Cluster Control Center</p>
-                </div>
+    <!-- =========================================================
+         ADMIN LOCK SCREEN (BRUTE-FORCE PROTECTED + SHORT-LIVED TOKEN)
+         ========================================================= -->
+    <div id="adminLoginScreen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/92 backdrop-blur-md">
+        <div class="admin-glass max-w-md w-full p-7 rounded-3xl shadow-2xl space-y-5 text-center">
+            <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-3xl flex items-center justify-center mx-auto shadow-lg">🛡️</div>
+            <div>
+                <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black uppercase">E2E AES-256 Encrypted</span>
+                <h1 class="text-2xl font-black mt-2">RWA ULTRA ADMIN PRO</h1>
+                <p class="text-xs opacity-70 font-bold mt-1">4-MongoDB Command Center • 5-Attempt Brute-Force Shield</p>
             </div>
-
-            <div class="space-y-4">
-                <div>
-                    <label class="text-xs font-extrabold uppercase tracking-wide opacity-80">Admin Secret Key</label>
-                    <input id="adminKeyInput" type="password" placeholder="Enter ADMIN_PANEL_KEY..." class="admin-input mt-1">
-                </div>
-
-                <details class="text-xs">
-                    <summary class="cursor-pointer font-bold text-sky-700 dark:text-sky-300">⚙️ Custom Backend Server (Optional)</summary>
-                    <input id="adminServerInput" type="url" value="https://pdfsownlaoder.onrender.com" class="admin-input mt-2 font-mono text-[11px]">
-                </details>
-
-                <label class="flex items-center gap-2 text-xs font-bold cursor-pointer">
-                    <input id="rememberAdminKey" type="checkbox" checked class="w-4 h-4 accent-blue-600 rounded">
-                    <span>Remember session on this device</span>
-                </label>
-
-                <button id="adminLoginBtn" onclick="verifyAdminLogin()" class="admin-btn-primary w-full py-3.5 text-sm">
-                    🔓 Unlock Admin Dashboard
-                </button>
+            <div class="text-left space-y-2">
+                <label class="text-xs font-extrabold opacity-80">Master Admin Key</label>
+                <input id="adminKeyInput" type="password" placeholder="Enter Master Admin Key..." onkeydown="if(event.key==='Enter') unlockAdminPanel()" class="admin-input">
             </div>
+            <div id="adminLoginErr" class="hidden p-3 rounded-xl bg-rose-100 text-rose-800 text-xs font-extrabold"></div>
+            <button id="unlockBtn" onclick="unlockAdminPanel()" class="admin-btn-primary w-full py-3.5 text-sm">🔓 Unlock Command Center</button>
         </div>
     </div>
 
-    <!-- MAIN ADMIN SHELL -->
-    <div id="adminShell" class="hidden flex-1 flex flex-col lg:flex-row min-h-screen">
+    <!-- =========================================================
+         MAIN ADMIN SHELL (SIDEBAR + WORKSPACE)
+         ========================================================= -->
+    <div id="adminMainShell" class="hidden min-h-screen flex flex-col lg:flex-row">
 
-        <!-- SIDEBAR (PC) & DRAWER (MOBILE) -->
-        <aside id="adminSidebar" class="admin-sidebar">
-            <div class="p-4 flex items-center justify-between border-b border-sky-200/50">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-500 to-blue-700 text-white font-black flex items-center justify-center shadow">R</div>
-                    <div>
-                        <div class="font-black text-sm leading-none">RWA ADMIN PRO</div>
-                        <div id="clusterStatusPill" class="text-[10px] font-extrabold text-emerald-600 mt-1">● Cluster Online</div>
-                    </div>
+        <!-- MOBILE TOP BAR -->
+        <header class="lg:hidden sticky top-0 z-30 admin-glass px-4 py-3 flex items-center justify-between border-b">
+            <div class="flex items-center gap-2.5">
+                <button onclick="toggleAdminSidebar()" class="w-9 h-9 rounded-xl bg-blue-600 text-white font-black text-lg border-0 cursor-pointer">☰</button>
+                <div>
+                    <div class="font-black text-sm leading-none">RWA ADMIN PRO</div>
+                    <div class="text-[10px] font-bold text-emerald-600 mt-0.5">🛡️ E2E Shield Active</div>
                 </div>
-                <button onclick="toggleMobileSidebar(false)" class="lg:hidden text-lg font-black px-2">✕</button>
+            </div>
+            <button onclick="manualRefreshAdmin()" class="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-extrabold text-xs border-0 cursor-pointer">🔄 Sync</button>
+        </header>
+
+        <!-- SIDEBAR -->
+        <aside id="adminSidebar" class="admin-sidebar fixed lg:sticky top-0 left-0 h-screen w-64 z-40 p-4 flex flex-col justify-between transition-transform -translate-x-full lg:translate-x-0 overflow-y-auto">
+            <div class="space-y-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-700 text-white font-black text-xl flex items-center justify-center shadow">R</div>
+                        <div>
+                            <div class="font-black text-sm leading-none">RWA ADMIN PRO</div>
+                            <div class="text-[10px] font-bold text-emerald-500 mt-1">● E2E Shield Online</div>
+                        </div>
+                    </div>
+                    <button onclick="toggleAdminSidebar()" class="lg:hidden text-rose-500 font-black text-lg bg-transparent border-0 cursor-pointer">✕</button>
+                </div>
+
+                <nav class="space-y-1">
+                    <button onclick="switchAdminTab('overview')" data-atab="overview" class="anav-btn active">📊 Overview & 4-DB</button>
+                    <button onclick="switchAdminTab('radar')" data-atab="radar" class="anav-btn">📡 Live Radar & Feed</button>
+                    <button onclick="switchAdminTab('users')" data-atab="users" class="anav-btn">👥 All Users & A-Z</button>
+                    <button onclick="switchAdminTab('analytics')" data-atab="analytics" class="anav-btn">🏆 Toppers & Test Stats</button>
+                    <button onclick="switchAdminTab('tokens')" data-atab="tokens" class="anav-btn">🔑 Cloud Token Pool</button>
+                    <button onclick="switchAdminTab('content')" data-atab="content" class="anav-btn">📢 Notices, Quiz & CA</button>
+                    <button onclick="switchAdminTab('controls')" data-atab="controls" class="anav-btn">🎛️ Kill-Switches & Promo</button>
+                    <button onclick="switchAdminTab('reports')" data-atab="reports" class="anav-btn">🚩 Reports (2-Way)</button>
+                    <button onclick="switchAdminTab('security')" data-atab="security" class="anav-btn">🛡️ Security, IP & Diag</button>
+                </nav>
             </div>
 
-            <nav class="p-3 space-y-1.5 flex-1 overflow-y-auto">
-                <button onclick="switchAdminTab('dashboard')" data-tab="dashboard" class="side-nav-btn active">📊 Overview & 4-DB</button>
-                <button onclick="switchAdminTab('users')" data-tab="users" class="side-nav-btn">👥 All Users & A-Z</button>
-                <button onclick="switchAdminTab('activity')" data-tab="activity" class="side-nav-btn">🔴 Live Activity</button>
-                <button onclick="switchAdminTab('tokens')" data-tab="tokens" class="side-nav-btn">🔑 Cloud Token Pool</button>
-                <button onclick="switchAdminTab('controls')" data-tab="controls" class="side-nav-btn">🛠️ Maintenance & Alerts</button>
-                <button onclick="switchAdminTab('notices')" data-tab="notices" class="side-nav-btn">📢 Notice Board</button>
-                <button onclick="switchAdminTab('reports')" data-tab="reports" class="side-nav-btn">🚩 User Reports</button>
-                <button onclick="switchAdminTab('errors')" data-tab="errors" class="side-nav-btn">🐞 Error Logs Folder</button>
-                <button onclick="switchAdminTab('backup')" data-tab="backup" class="side-nav-btn">💾 4-DB Backup</button>
-            </nav>
-
-            <div class="p-3 border-t border-sky-200/50 space-y-2">
-                <button onclick="toggleAdminTheme()" id="themeToggleBtn" class="side-nav-btn bg-sky-100/70 dark:bg-slate-800">🌙 Dark Mode</button>
-                <button onclick="logoutAdmin()" class="w-full py-2.5 rounded-xl bg-rose-600 text-white font-extrabold text-xs cursor-pointer border-0">🚪 Lock / Logout</button>
+            <div class="pt-4 border-t border-sky-200/40 space-y-2">
+                <button onclick="toggleAdminTheme()" class="anav-btn">🌙 Toggle Dark Mode</button>
+                <button onclick="lockAdminPanel()" class="w-full py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs border-0 cursor-pointer">🔒 Lock / Logout</button>
             </div>
         </aside>
 
-        <!-- MOBILE SIDEBAR BACKDROP -->
-        <div id="sidebarBackdrop" onclick="toggleMobileSidebar(false)" class="fixed inset-0 bg-slate-950/50 z-30 hidden lg:hidden"></div>
+        <!-- MAIN WORKSPACE -->
+        <main class="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto space-y-5">
 
-        <!-- CONTENT WORKSPACE -->
-        <div class="flex-1 flex flex-col min-w-0">
-            <!-- TOP BAR -->
-            <header class="admin-topbar sticky top-0 z-20 px-4 py-3 flex items-center justify-between gap-2">
-                <div class="flex items-center gap-2.5">
-                    <button onclick="toggleMobileSidebar(true)" class="lg:hidden px-3 py-2 rounded-xl bg-sky-600 text-white font-black text-sm border-0">☰</button>
-                    <div>
-                        <h2 id="activeTabTitle" class="font-black text-base sm:text-lg leading-tight">📊 Overview & 4-MongoDB Cluster</h2>
-                        <div id="lastSyncTime" class="text-[10px] font-bold opacity-70">Syncing...</div>
+            <!-- TOP WORKSPACE STATUS BAR (5-MIN AUTO REFRESH TIMER + MANUAL SYNC) -->
+            <div class="admin-glass p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 id="adminTabTitle" class="text-xl font-black leading-tight">📊 Overview & 4-MongoDB Cluster</h2>
+                    <div class="flex items-center gap-3 flex-wrap mt-0.5 text-[11px] font-bold opacity-75">
+                        <span id="adminLastUpdated">Updated: --</span>
+                        <span>•</span>
+                        <span id="autoRefreshCountdown" class="text-blue-600 dark:text-sky-400">⏱ Auto-Refresh in 05:00</span>
                     </div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span id="maintHeaderBadge" class="hidden px-2.5 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black animate-pulse">🔴 MAINTENANCE ON</span>
-                    <button onclick="refreshCurrentTab()" class="admin-btn-soft text-xs">🔄 Refresh</button>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button onclick="exportUsersCsvFile()" class="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-extrabold text-xs border-0 cursor-pointer">📊 Export CSV</button>
+                    <button onclick="manualRefreshAdmin()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold text-xs border-0 shadow cursor-pointer">🔄 Refresh Now</button>
                 </div>
-            </header>
+            </div>
 
-            <!-- TAB PAGES -->
-            <main class="p-3 sm:p-6 flex-1 space-y-6 pb-20">
+            <!-- ==================== TAB 1: OVERVIEW & 4-DB ==================== -->
+            <section id="tab_overview" class="atab-section space-y-5">
+                <div id="kpiCardsGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-3.5"></div>
 
-                <!-- 1. DASHBOARD OVERVIEW -->
-                <section id="tab_dashboard" class="admin-tab-section space-y-6">
-                    <div id="kpiGrid" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5"></div>
-
-                    <div class="admin-glass-card p-5 rounded-3xl">
-                        <div class="flex flex-wrap justify-between items-center gap-2 mb-4">
-                            <div>
-                                <h3 class="font-black text-base">🗄️ 4-MongoDB Auto-Sharding Cluster Health</h3>
-                                <p class="text-xs opacity-75 font-semibold">420 MB par automatic next DB par shift hota hai (512 MB Free Limit)</p>
-                            </div>
-                            <span id="connectedDbsBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">0 / 4 Connected</span>
-                        </div>
-                        <div id="shardsGrid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4"></div>
-                    </div>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                        <div class="admin-glass-card p-5 rounded-3xl">
-                            <div class="flex justify-between items-center mb-3">
-                                <h3 class="font-black text-base">⚡ Quick Portal Switches</h3>
-                                <button onclick="switchAdminTab('controls')" class="text-xs font-extrabold text-blue-600 cursor-pointer bg-transparent border-0">Full Settings ➔</button>
-                            </div>
-                            <div id="quickSwitchesBox" class="space-y-3"></div>
-                        </div>
-
-                        <div class="admin-glass-card p-5 rounded-3xl">
-                            <div class="flex justify-between items-center mb-3">
-                                <h3 class="font-black text-base">🔴 Latest Live Activities</h3>
-                                <button onclick="switchAdminTab('activity')" class="text-xs font-extrabold text-blue-600 cursor-pointer bg-transparent border-0">View All ➔</button>
-                            </div>
-                            <div id="miniActivityBox" class="space-y-2.5 max-h-64 overflow-y-auto"></div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- 2. ALL USERS & A-TO-Z INSPECTOR -->
-                <section id="tab_users" class="admin-tab-section hidden space-y-4">
-                    <div class="admin-glass-card p-4 rounded-3xl flex flex-col sm:flex-row gap-3 justify-between items-stretch sm:items-center">
-                        <div class="flex gap-2 flex-1">
-                            <input id="userSearchInput" type="text" placeholder="🔍 Search by Name, Phone, Email, User ID, State..." class="admin-input flex-1" onkeydown="if(event.key==='Enter') loadUsers(1)">
-                            <button onclick="loadUsers(1)" class="admin-btn-primary px-4 text-xs">Search</button>
-                        </div>
-                        <div class="flex gap-1.5 flex-wrap">
-                            <button onclick="setUserFilter('all', this)" class="u-filter-pill active">All</button>
-                            <button onclick="setUserFilter('active', this)" class="u-filter-pill">Active Today</button>
-                            <button onclick="setUserFilter('blocked', this)" class="u-filter-pill">🚫 Blocked</button>
-                        </div>
-                    </div>
-
-                    <div id="usersListContainer" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"></div>
-                    <div id="usersPagination" class="flex justify-center items-center gap-3 pt-2"></div>
-                </section>
-
-                <!-- 3. LIVE ACTIVITY FEED -->
-                <section id="tab_activity" class="admin-tab-section hidden space-y-4">
-                    <div class="admin-glass-card p-4 rounded-3xl flex flex-wrap justify-between items-center gap-3">
+                <!-- 7-Day Growth Chart -->
+                <div class="admin-glass p-5 rounded-2xl">
+                    <div class="flex flex-wrap justify-between items-center gap-2 mb-3">
                         <div>
-                            <h3 class="font-black text-base">🔴 Global Live Activity Feed (All 4 DBs)</h3>
-                            <p class="text-xs opacity-75 font-semibold">Login, Batch Open, Video Watch, PDF View, Test Submit — sab live dikhta hai</p>
+                            <h3 class="font-black text-base">📈 7-Day Platform Growth & Traffic</h3>
+                            <p class="text-[11px] font-bold opacity-65">Blue = Active Students • Green = Tests Submitted • Purple = New Joins</p>
                         </div>
-                        <label class="flex items-center gap-2 text-xs font-extrabold bg-sky-100/80 dark:bg-slate-800 px-3 py-2 rounded-xl cursor-pointer">
-                            <input id="autoRefreshActToggle" type="checkbox" onchange="toggleAutoRefreshActivity()" class="w-4 h-4 accent-blue-600">
-                            <span>Auto-Refresh (15s)</span>
-                        </label>
                     </div>
-                    <div id="globalActivityContainer" class="space-y-2.5"></div>
-                </section>
+                    <div id="growth7dChart" class="flex items-end gap-3 h-40 pt-4 overflow-x-auto"></div>
+                </div>
 
-                <!-- 4. CLOUD TOKEN POOL -->
-                <section id="tab_tokens" class="admin-tab-section hidden space-y-5">
-                    <div class="admin-glass-card p-5 rounded-3xl">
-                        <h3 class="font-black text-base mb-3">➕ Add Token to Global Cloud Pool</h3>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-                            <input id="poolUidInput" type="text" placeholder="User ID (e.g. 4756316)" class="admin-input">
-                            <input id="poolLabelInput" type="text" placeholder="Label (e.g. SSC GD Batch Account)" class="admin-input">
-                        </div>
-                        <textarea id="poolJwtInput" rows="3" placeholder="Paste JWT Authorization Token (eyJ...)" class="admin-input font-mono text-xs mb-3"></textarea>
-                        <button onclick="addTokenToPool()" class="admin-btn-primary px-6 py-2.5 text-xs">💾 Save Token to Pool</button>
-                    </div>
-
-                    <div class="admin-glass-card p-5 rounded-3xl">
-                        <h3 class="font-black text-base mb-3">🔑 Active Cloud Tokens (<span id="poolCountSpan">0</span>)</h3>
-                        <div id="tokenPoolList" class="space-y-3"></div>
-                    </div>
-                </section>
-
-                <!-- 5. MAINTENANCE & ALERTS -->
-                <section id="tab_controls" class="admin-tab-section hidden space-y-5">
-                    <div class="admin-glass-card p-5 rounded-3xl space-y-5 max-w-2xl">
+                <!-- 4-MongoDB Auto-Sharding Cluster Health -->
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
                         <div>
-                            <h3 class="font-black text-lg">🛠️ Website Maintenance & Telegram Alert Controls</h3>
-                            <p class="text-xs opacity-75 font-semibold">Yahan se kiya gaya har change turant Website aur Telegram Bot dono par apply hota hai.</p>
+                            <h3 class="font-black text-base">🗄️ 4-MongoDB Auto-Sharding Cluster Health</h3>
+                            <p class="text-[11px] font-bold opacity-65">420 MB threshold par auto next shard routing (512 MB Free Limit)</p>
                         </div>
-
-                        <div class="flex items-center justify-between p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800">
-                            <div>
-                                <div class="font-black text-sm text-rose-700 dark:text-rose-300">🚧 Website Maintenance Mode</div>
-                                <div class="text-xs opacity-80">ON karte hi student portal lock ho jayega aur maintenance screen dikhegi</div>
-                            </div>
-                            <input id="ctrlMaintToggle" type="checkbox" class="toggle-switch">
+                        <div class="flex items-center gap-2">
+                            <span id="activeShardsBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">0 / 4 DBs Active</span>
+                            <button onclick="cleanOldClusterLogs()" class="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold border-0 cursor-pointer">🧹 Clean Old Logs (30d+)</button>
                         </div>
-
-                        <div>
-                            <label class="text-xs font-extrabold uppercase opacity-80">Custom Maintenance Message</label>
-                            <textarea id="ctrlMaintMsg" rows="3" class="admin-input mt-1" placeholder="Portal abhi update par hai..."></textarea>
-                        </div>
-
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div class="flex items-center justify-between p-4 rounded-2xl bg-sky-50 dark:bg-slate-800/70 border border-sky-200 dark:border-slate-700">
-                                <div>
-                                    <div class="font-extrabold text-xs">🔔 Telegram Login Alerts</div>
-                                    <div class="text-[11px] opacity-70">Har user login par alert</div>
-                                </div>
-                                <input id="ctrlLoginAlertToggle" type="checkbox" class="toggle-switch">
-                            </div>
-
-                            <div class="flex items-center justify-between p-4 rounded-2xl bg-sky-50 dark:bg-slate-800/70 border border-sky-200 dark:border-slate-700">
-                                <div>
-                                    <div class="font-extrabold text-xs">📝 Test Submit Alerts</div>
-                                    <div class="text-[11px] opacity-70">Test submit hote hi alert</div>
-                                </div>
-                                <input id="ctrlTestAlertToggle" type="checkbox" class="toggle-switch">
-                            </div>
-                        </div>
-
-                        <button onclick="savePortalControls()" class="admin-btn-primary px-6 py-3 text-sm w-full sm:w-auto">💾 Save All Controls</button>
                     </div>
-                </section>
+                    <div id="shardsHealthContainer" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                </div>
 
-                <!-- 6. NOTICE BOARD -->
-                <section id="tab_notices" class="admin-tab-section hidden space-y-5">
-                    <div class="admin-glass-card p-5 rounded-3xl max-w-3xl">
-                        <h3 class="font-black text-base mb-3">📢 Publish New Live Notice</h3>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
-                            <input id="noticeTitleInput" type="text" placeholder="Notice Title (e.g. SSC GD New Mock)" class="admin-input sm:col-span-2">
-                            <select id="noticeLevelInput" class="admin-input">
-                                <option value="info">🔵 Info</option>
-                                <option value="success">🟢 Update / Launch</option>
-                                <option value="warning">🟡 Important</option>
-                                <option value="urgent">🔴 Urgent Alert</option>
+                <!-- Quick Portal Switches + Latest Activities -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-black text-base">⚡ Quick Portal Switches</h3>
+                            <button onclick="switchAdminTab('controls')" class="text-xs font-black text-blue-600 bg-transparent border-0 cursor-pointer">All Controls →</button>
+                        </div>
+                        <div id="quickSwitchesBox" class="space-y-2.5 text-xs"></div>
+                    </div>
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-black text-base">🔴 Latest Live Activities</h3>
+                            <button onclick="switchAdminTab('radar')" class="text-xs font-black text-blue-600 bg-transparent border-0 cursor-pointer">Live Radar →</button>
+                        </div>
+                        <div id="overviewActivitiesBox" class="space-y-2 text-xs max-h-64 overflow-y-auto"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 2: LIVE RADAR & FEED ==================== -->
+            <section id="tab_radar" class="atab-section hidden space-y-5">
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <div class="flex justify-between items-center flex-wrap gap-2">
+                        <div>
+                            <h3 class="font-black text-base">📡 Live "Who Is Online Right Now" Radar</h3>
+                            <p class="text-[11px] font-bold opacity-65">Last 2 minutes mein active students (exact screen & device)</p>
+                        </div>
+                        <span id="radarLiveCountPill" class="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-black">0 LIVE NOW</span>
+                    </div>
+                    <div id="liveRadarGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                </div>
+
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">🔴 Global Live Activity Feed (All 4 Shards)</h3>
+                    <div id="globalActivityList" class="space-y-2 text-xs"></div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 3: ALL USERS & A-Z ==================== -->
+            <section id="tab_users" class="atab-section hidden space-y-4">
+                <div class="admin-glass p-4 rounded-2xl space-y-3">
+                    <div class="flex flex-wrap gap-2">
+                        <input id="userSearchInput" type="text" placeholder="Search Name, UID, Phone, Email, IP, State..." onkeydown="if(event.key==='Enter') loadUsers(1)" class="admin-input flex-1 min-w-[220px]">
+                        <button onclick="loadUsers(1)" class="admin-btn-primary px-5 text-xs">🔍 Search</button>
+                    </div>
+                    <div id="userFilterPills" class="flex gap-2 flex-wrap">
+                        <button onclick="setUserFilter('all', this)" class="ufilter-pill active">All</button>
+                        <button onclick="setUserFilter('online', this)" class="ufilter-pill">🟢 Online</button>
+                        <button onclick="setUserFilter('logged_out', this)" class="ufilter-pill">⚪ Logged Out</button>
+                        <button onclick="setUserFilter('active', this)" class="ufilter-pill">🔥 Active Today</button>
+                        <button onclick="setUserFilter('vip', this)" class="ufilter-pill">⭐ VIP / Topper</button>
+                        <button onclick="setUserFilter('blocked', this)" class="ufilter-pill">🚫 Blocked</button>
+                    </div>
+                </div>
+
+                <div id="usersListGrid" class="grid grid-cols-1 md:grid-cols-2 gap-3.5"></div>
+                <div id="usersPagination" class="flex justify-center items-center gap-3 pt-2"></div>
+            </section>
+
+            <!-- ==================== TAB 4: TOP PERFORMERS & TEST ANALYTICS ==================== -->
+            <section id="tab_analytics" class="atab-section hidden space-y-5">
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">🏆 Top Performers Global Rank Board</h3>
+                    <div id="topPerformersList" class="space-y-2 text-xs"></div>
+                </div>
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">📊 Test Popularity, Difficulty & Leaderboard Moderator</h3>
+                    <p class="text-[11px] font-bold opacity-65">Fake ya buggy score ko 1-click mein leaderboard se delete kar sakte hain.</p>
+                    <div id="testAnalyticsList" class="space-y-3 text-xs"></div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 5: CLOUD TOKEN POOL ==================== -->
+            <section id="tab_tokens" class="atab-section hidden space-y-5">
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <h3 class="font-black text-base">🔑 Cloud Token Pool (Auto-Collected + Manual)</h3>
+                            <p class="text-[11px] font-bold opacity-65">Website par hamesha sirf "Cloud Server" dikhta hai — kisi user ka naam expose nahi hota.</p>
+                        </div>
+                        <button onclick="cleanDeadCloudTokens()" class="px-4 py-2 rounded-xl bg-amber-500 text-white font-extrabold text-xs border-0 cursor-pointer">🧹 Scan & Clean Dead Tokens</button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2">
+                        <input id="newPoolUid" type="text" placeholder="User ID (e.g. 2321546)" class="admin-input">
+                        <input id="newPoolLabel" type="text" placeholder="Internal Note (Sirf Admin ko dikhega)" class="admin-input">
+                        <input id="newPoolToken" type="text" placeholder="Paste JWT Token..." class="admin-input">
+                    </div>
+                    <button onclick="addManualPoolToken()" class="admin-btn-primary px-5 py-2.5 text-xs">➕ Add to Cloud Pool</button>
+                </div>
+                <div id="cloudTokensGrid" class="space-y-2.5"></div>
+            </section>
+
+            <!-- ==================== TAB 6: CONTENT HUB (NOTICES, BROADCAST, QUIZ, CA, SCHEDULED MOCKS) ==================== -->
+            <section id="tab_content" class="atab-section hidden space-y-5">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <!-- Notice Board -->
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">📢 Global Live Notice Board</h3>
+                        <input id="notTitle" type="text" placeholder="Notice Title" class="admin-input">
+                        <textarea id="notMsg" rows="2" placeholder="Notice Message..." class="admin-input"></textarea>
+                        <div class="flex gap-2">
+                            <select id="notLevel" class="admin-input flex-1">
+                                <option value="info">Blue Info</option>
+                                <option value="success">Green Success</option>
+                                <option value="warning">Amber Warning</option>
+                                <option value="urgent">Red Urgent</option>
                             </select>
+                            <button onclick="publishNotice()" class="admin-btn-primary px-5 text-xs">Publish</button>
                         </div>
-                        <textarea id="noticeMsgInput" rows="3" placeholder="Notice details jo students ko Home screen par dikhengi..." class="admin-input mb-3"></textarea>
-                        <button onclick="publishNotice()" class="admin-btn-primary px-6 py-2.5 text-xs">🚀 Publish Notice Live</button>
+                        <div id="noticesListBox" class="space-y-2 text-xs pt-2"></div>
                     </div>
 
-                    <div id="noticesListContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-                </section>
+                    <!-- Targeted Group Broadcast -->
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">🎯 Targeted Group Broadcast (Inbox Bell)</h3>
+                        <select id="bcGroup" onchange="document.getElementById('bcStateInp').classList.toggle('hidden', this.value!=='state')" class="admin-input">
+                            <option value="all">All Active Students</option>
+                            <option value="inactive_3d">Inactive Students (3+ Days)</option>
+                            <option value="top_performers">Top Performers / VIP / 3d+ Streak</option>
+                            <option value="state">Specific State / District</option>
+                        </select>
+                        <input id="bcStateInp" type="text" placeholder="State name (e.g. Rajasthan / UP)" class="admin-input hidden">
+                        <input id="bcTitle" type="text" placeholder="Broadcast Title" class="admin-input">
+                        <textarea id="bcMsg" rows="2" placeholder="Message for student inbox..." class="admin-input"></textarea>
+                        <button onclick="sendTargetedBroadcast()" class="admin-btn-primary w-full py-2.5 text-xs">🚀 Send Group Broadcast</button>
+                    </div>
+                </div>
 
-                <!-- 7. USER REPORTS -->
-                <section id="tab_reports" class="admin-tab-section hidden space-y-4">
-                    <div id="reportsListContainer" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
-                </section>
+                <!-- Daily Current Affairs Capsule Publisher -->
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">📰 Daily Current Affairs & Static GK Capsules</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <input id="caTitle" type="text" placeholder="Capsule Title (e.g. 24 Nov Top Current Affairs)" class="admin-input">
+                        <input id="caCat" type="text" placeholder="Category (e.g. Current Affairs / Polity / Static GK)" class="admin-input">
+                    </div>
+                    <textarea id="caPoints" rows="3" placeholder="Har line par ek one-liner point likhein..." class="admin-input"></textarea>
+                    <button onclick="publishCaCapsule()" class="admin-btn-primary px-5 py-2.5 text-xs">➕ Publish CA Capsule</button>
+                    <div id="caCapsulesAdminList" class="space-y-2 text-xs pt-2"></div>
+                </div>
 
-                <!-- 8. ERROR LOGS FOLDER -->
-                <section id="tab_errors" class="admin-tab-section hidden space-y-4">
-                    <div class="admin-glass-card p-4 rounded-3xl flex flex-wrap justify-between items-center gap-3">
-                        <div>
-                            <h3 class="font-black text-base">🐞 System & Portal Error Logs Folder</h3>
-                            <p class="text-xs opacity-75 font-semibold">Video stream errors, token errors aur portal exceptions yahan automatically collect hote hain</p>
+                <!-- Daily 5-Min Rapid Quiz Publisher & Scheduled Weekly Mocks -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">⚡ Daily 5-Min Rapid Quiz Publisher</h3>
+                        <input id="dqTitle" type="text" value="Daily 5-Min Rapid Quiz" class="admin-input">
+                        <textarea id="dqJson" rows="5" placeholder='[{"q":"Question?","opts":["A","B","C","D"],"ans":0,"exp":"Explanation"}]' class="admin-input font-mono text-[11px]"></textarea>
+                        <button onclick="publishDailyQuiz()" class="admin-btn-primary w-full py-2.5 text-xs">🚀 Publish Today's Quiz</button>
+                    </div>
+
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">🗓️ Scheduled Weekly Live Mock (Sunday Special)</h3>
+                        <input id="schTitle" type="text" placeholder="Mock Title (e.g. SSC GD Sunday Live Mega Test)" class="admin-input">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input id="schSeriesId" type="text" placeholder="Series ID (e.g. 708)" class="admin-input">
+                            <input id="schTestId" type="text" placeholder="Test ID (e.g. 41288)" class="admin-input">
                         </div>
-                        <button onclick="clearAllErrorLogs()" class="px-4 py-2 rounded-xl bg-rose-600 text-white font-extrabold text-xs border-0 cursor-pointer">🗑 Clear All Errors</button>
+                        <div class="grid grid-cols-2 gap-2">
+                            <input id="schStart" type="datetime-local" class="admin-input" title="Start Time">
+                            <input id="schResult" type="datetime-local" class="admin-input" title="Result Time">
+                        </div>
+                        <button onclick="publishScheduledMock()" class="admin-btn-primary w-full py-2.5 text-xs">📅 Save Scheduled Mock</button>
+                        <div id="scheduledMocksList" class="space-y-2 text-xs pt-2"></div>
                     </div>
-                    <div id="errorLogsContainer" class="space-y-3"></div>
-                </section>
+                </div>
+            </section>
 
-                <!-- 9. FULL 4-DB BACKUP -->
-                <section id="tab_backup" class="admin-tab-section hidden">
-                    <div class="admin-glass-card p-6 rounded-3xl max-w-xl space-y-4">
-                        <div class="text-4xl">💾</div>
-                        <h3 class="font-black text-xl">Complete 4-MongoDB Cluster Backup</h3>
-                        <p class="text-xs opacity-80 leading-relaxed font-semibold">
-                            Ek click mein DB-1, DB-2, DB-3 aur DB-4 ka saara data (Users, Sync Data, Watch Progress, Notes, Bookmarks, Test Attempts, Tokens, Notices, Reports aur Error Logs) ek clean JSON file mein download karein.
-                        </p>
-                        <button onclick="downloadFullBackup()" class="admin-btn-primary px-6 py-3.5 text-sm">📥 Download Full 4-DB JSON Backup</button>
+            <!-- ==================== TAB 7: KILL-SWITCHES, VERSION & PROMO POPUP ==================== -->
+            <section id="tab_controls" class="atab-section hidden space-y-5">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">🎛️ Maintenance, Version & Module Kill-Switches</h3>
+                        <div id="fullControlsBox" class="space-y-3 text-xs"></div>
                     </div>
-                </section>
 
-            </main>
-        </div>
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">🎁 Promo Popup Banner Manager</h3>
+                        <label class="flex items-center gap-2 text-xs font-extrabold cursor-pointer">
+                            <input id="promoEnabled" type="checkbox" class="w-4 h-4 accent-blue-600">
+                            <span>Enable Promo Popup on Student Websites</span>
+                        </label>
+                        <input id="promoTitle" type="text" placeholder="Banner Title" class="admin-input">
+                        <textarea id="promoMsg" rows="2" placeholder="Promo Message..." class="admin-input"></textarea>
+                        <input id="promoImg" type="text" placeholder="Banner Image URL (Optional)" class="admin-input">
+                        <div class="grid grid-cols-2 gap-2">
+                            <input id="promoBtnTxt" type="text" placeholder="Button Text (e.g. Join Telegram)" class="admin-input">
+                            <input id="promoBtnUrl" type="text" placeholder="Button Link URL" class="admin-input">
+                        </div>
+                        <button onclick="savePromoPopupSettings()" class="admin-btn-primary w-full py-2.5 text-xs">💾 Save Promo Popup</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 8: 2-WAY USER REPORTS ==================== -->
+            <section id="tab_reports" class="atab-section hidden space-y-4">
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">🚩 Student Reports & Question Mistake Flags (2-Way Reply)</h3>
+                    <div id="reportsListBox" class="space-y-3 text-xs"></div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 9: SECURITY, IP BANS, DIAGNOSTICS, ERRORS & AUDIT ==================== -->
+            <section id="tab_security" class="atab-section hidden space-y-5">
+                <!-- 1-Click System Diagnostics -->
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <div class="flex justify-between items-center flex-wrap gap-2">
+                        <h3 class="font-black text-base">🩺 1-Click Live System Diagnostics</h3>
+                        <button onclick="runDiagnostics()" class="admin-btn-primary px-4 py-2 text-xs">⚡ Run Health Check</button>
+                    </div>
+                    <div id="diagnosticsBox" class="text-xs opacity-75 font-bold">Click "Run Health Check" to test all 4 MongoDB shards, Cloudflare Worker, and RWA API latency.</div>
+                </div>
+
+                <!-- IP Ban Manager -->
+                <div class="admin-glass p-5 rounded-2xl space-y-3">
+                    <h3 class="font-black text-base">🚫 Direct IP Ban Shield</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <input id="banIpInput" type="text" placeholder="IP Address (e.g. 103.45.x.x)" class="admin-input">
+                        <input id="banIpReason" type="text" placeholder="Reason (e.g. Spam / Scraping)" class="admin-input">
+                        <button onclick="banIpManual()" class="px-4 py-2.5 rounded-xl bg-rose-600 text-white font-extrabold text-xs border-0 cursor-pointer">🚫 Ban IP</button>
+                    </div>
+                    <div id="bannedIpsList" class="space-y-2 text-xs"></div>
+                </div>
+
+                <!-- Error Logs & Admin Audit Logs -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-black text-base">🐞 Error & Security Shield Logs</h3>
+                            <button onclick="clearErrorLogs()" class="px-3 py-1 rounded-lg bg-rose-600 text-white text-[11px] font-black border-0 cursor-pointer">🗑 Clear</button>
+                        </div>
+                        <div id="errorLogsBox" class="space-y-2 text-xs max-h-80 overflow-y-auto"></div>
+                    </div>
+
+                    <div class="admin-glass p-5 rounded-2xl space-y-3">
+                        <h3 class="font-black text-base">📜 Admin Audit Log (Action History)</h3>
+                        <div id="auditLogsBox" class="space-y-2 text-xs max-h-80 overflow-y-auto"></div>
+                    </div>
+                </div>
+
+                <div class="admin-glass p-5 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 class="font-black text-base">💾 Encrypted 4-DB JSON Snapshot</h3>
+                        <p class="text-[11px] font-bold opacity-65">Sensitive fields (tokens, passwords, phones) backup mein bhi encrypted rehte hain.</p>
+                    </div>
+                    <button onclick="downloadClusterBackup()" class="admin-btn-primary px-5 py-2.5 text-xs">⬇ Download Encrypted Backup</button>
+                </div>
+            </section>
+
+        </main>
     </div>
 
-    <!-- USER A-TO-Z INSPECTOR MODAL -->
-    <div id="userDossierModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-5">
-        <div class="admin-glass-card w-full max-w-3xl rounded-3xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
-            <div class="p-4 sm:p-5 border-b border-sky-200/50 flex justify-between items-center gap-3">
+    <!-- =========================================================
+         FULL USER A-Z DOSSIER MODAL (SCORECARDS, MISTAKES, BOOKMARKS, VIP, MESSAGE, FORCE LOGOUT)
+         ========================================================= -->
+    <div id="userDossierModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+        <div class="admin-glass w-full max-w-4xl max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-4 sm:p-5 border-b border-sky-200/50 flex items-center justify-between gap-3">
                 <div class="min-w-0">
-                    <span id="modalUserShard" class="px-2.5 py-0.5 rounded-full bg-sky-100 text-sky-900 text-[10px] font-black">DB-1</span>
-                    <h3 id="modalUserName" class="font-black text-lg truncate mt-1">User Profile</h3>
+                    <h3 id="dossierTitle" class="font-black text-lg truncate">User Full Dossier</h3>
+                    <div id="dossierSubtitle" class="text-xs font-bold opacity-70 truncate">Loading...</div>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    <button id="modalExportBtn" class="admin-btn-soft text-xs">📥 JSON</button>
-                    <button onclick="closeUserModal()" class="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 font-black border-0 cursor-pointer">✕</button>
-                </div>
+                <button onclick="closeUserDossier()" class="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 font-black text-base border-0 cursor-pointer shrink-0">✕</button>
             </div>
 
-            <!-- Modal Sub Tabs -->
-            <div class="px-4 pt-3 pb-2 flex gap-2 overflow-x-auto border-b border-sky-200/40">
-                <button onclick="switchModalTab('profile', this)" class="m-tab-btn active">👤 Profile & Auth</button>
-                <button onclick="switchModalTab('courses', this)" class="m-tab-btn">🎓 Courses</button>
-                <button onclick="switchModalTab('activity', this)" class="m-tab-btn">⚡ Activity Log</button>
-                <button onclick="switchModalTab('tests', this)" class="m-tab-btn">📝 Test Scores</button>
+            <!-- Dossier Sub-Tabs -->
+            <div id="dossierSubTabs" class="px-4 py-2.5 border-b border-sky-200/40 flex gap-2 overflow-x-auto">
+                <button onclick="switchDossierTab('info')" data-dtab="info" class="ufilter-pill active">👤 Profile & Controls</button>
+                <button onclick="switchDossierTab('tests')" data-dtab="tests" class="ufilter-pill">📊 Scorecards & Analysis</button>
+                <button onclick="switchDossierTab('mistakes')" data-dtab="mistakes" class="ufilter-pill">❌ Mistake Bank</button>
+                <button onclick="switchDossierTab('bookmarks')" data-dtab="bookmarks" class="ufilter-pill">🔖 Bookmarks</button>
+                <button onclick="switchDossierTab('logs')" data-dtab="logs" class="ufilter-pill">🔴 Activity & Inbox</button>
             </div>
 
-            <div id="modalBodyContent" class="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4"></div>
+            <div id="dossierBody" class="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4 text-xs"></div>
         </div>
     </div>
 
+    <script src="rwa-security.js"></script>
     <script src="admin.js"></script>
 </body>
 </html>
