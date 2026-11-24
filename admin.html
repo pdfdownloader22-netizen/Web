@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>RWA Ultra-Pro Command Center | 4-MongoDB Admin</title>
+    <title>RWA Ultra-Pro Command Center | Multi-MongoDB Admin</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
     <link rel="stylesheet" href="admin.css">
@@ -23,7 +23,7 @@
             <div>
                 <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black uppercase">E2E AES-256 Encrypted</span>
                 <h1 class="text-2xl font-black mt-2">RWA ULTRA ADMIN PRO</h1>
-                <p class="text-xs opacity-70 font-bold mt-1">4-MongoDB Command Center • 5-Attempt Brute-Force Shield</p>
+                <p class="text-xs opacity-70 font-bold mt-1">Unlimited MongoDB Cluster • Cloud Vault • Brute-Force Shield</p>
             </div>
             <div class="text-left space-y-2">
                 <label class="text-xs font-extrabold opacity-80">Master Admin Key</label>
@@ -66,7 +66,8 @@
                 </div>
 
                 <nav class="space-y-1">
-                    <button onclick="switchAdminTab('overview')" data-atab="overview" class="anav-btn active">📊 Overview & 4-DB</button>
+                    <button onclick="switchAdminTab('overview')" data-atab="overview" class="anav-btn active">📊 Overview & DB Cluster</button>
+                    <button onclick="switchAdminTab('vault')" data-atab="vault" class="anav-btn">☁️ Content Vault (Mirror)</button>
                     <button onclick="switchAdminTab('radar')" data-atab="radar" class="anav-btn">📡 Live Radar & Feed</button>
                     <button onclick="switchAdminTab('users')" data-atab="users" class="anav-btn">👥 All Users & A-Z</button>
                     <button onclick="switchAdminTab('analytics')" data-atab="analytics" class="anav-btn">🏆 Toppers & Test Stats</button>
@@ -87,10 +88,10 @@
         <!-- MAIN WORKSPACE -->
         <main class="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto space-y-5">
 
-            <!-- TOP WORKSPACE STATUS BAR (5-MIN AUTO REFRESH TIMER + MANUAL SYNC) -->
+            <!-- TOP WORKSPACE STATUS BAR -->
             <div class="admin-glass p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 id="adminTabTitle" class="text-xl font-black leading-tight">📊 Overview & 4-MongoDB Cluster</h2>
+                    <h2 id="adminTabTitle" class="text-xl font-black leading-tight">📊 Overview & Multi-DB Cluster</h2>
                     <div class="flex items-center gap-3 flex-wrap mt-0.5 text-[11px] font-bold opacity-75">
                         <span id="adminLastUpdated">Updated: --</span>
                         <span>•</span>
@@ -98,12 +99,13 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
+                    <button onclick="flushServerRamCache()" class="px-3.5 py-2 rounded-xl bg-amber-500 text-white font-extrabold text-xs border-0 cursor-pointer" title="Clear Server RAM Cache">⚡ Flush RAM Cache</button>
                     <button onclick="exportUsersCsvFile()" class="px-3.5 py-2 rounded-xl bg-emerald-600 text-white font-extrabold text-xs border-0 cursor-pointer">📊 Export CSV</button>
                     <button onclick="manualRefreshAdmin()" class="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold text-xs border-0 shadow cursor-pointer">🔄 Refresh Now</button>
                 </div>
             </div>
 
-            <!-- ==================== TAB 1: OVERVIEW & 4-DB ==================== -->
+            <!-- ==================== TAB 1: OVERVIEW & UNLIMITED DB CLUSTER ==================== -->
             <section id="tab_overview" class="atab-section space-y-5">
                 <div id="kpiCardsGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-3.5"></div>
 
@@ -118,19 +120,29 @@
                     <div id="growth7dChart" class="flex items-end gap-3 h-40 pt-4 overflow-x-auto"></div>
                 </div>
 
-                <!-- 4-MongoDB Auto-Sharding Cluster Health -->
+                <!-- Unlimited User MongoDB Cluster Health + RAM Cache -->
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <div class="flex flex-wrap justify-between items-center gap-2">
                         <div>
-                            <h3 class="font-black text-base">🗄️ 4-MongoDB Auto-Sharding Cluster Health</h3>
-                            <p class="text-[11px] font-bold opacity-65">420 MB threshold par auto next shard routing (512 MB Free Limit)</p>
+                            <h3 class="font-black text-base">🗄️ User MongoDB Auto-Sharding Cluster (Unlimited URIs)</h3>
+                            <p class="text-[11px] font-bold opacity-65">MONGO_URI_1..N automatically detected • 420 MB par next shard auto-routing</p>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <span id="activeShardsBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">0 / 4 DBs Active</span>
-                            <button onclick="cleanOldClusterLogs()" class="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold border-0 cursor-pointer">🧹 Clean Old Logs (30d+)</button>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span id="ramCacheBadge" class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-xs font-black">⚡ RAM Cache: 0 keys</span>
+                            <span id="activeShardsBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">0 DBs Active</span>
+                            <button onclick="cleanOldClusterLogs()" class="px-3 py-1.5 rounded-xl bg-amber-500 text-white text-xs font-extrabold border-0 cursor-pointer">🧹 Clean Old Logs</button>
                         </div>
                     </div>
-                    <div id="shardsHealthContainer" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                    <div id="shardsHealthContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+                </div>
+
+                <!-- Quick Content Vault Snapshot -->
+                <div class="admin-glass p-5 rounded-2xl flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <h3 class="font-black text-base">☁️ Cloud Content Vault Quick Summary</h3>
+                        <p id="overviewVaultQuickText" class="text-xs font-bold opacity-75 mt-1">Loading vault summary...</p>
+                    </div>
+                    <button onclick="switchAdminTab('vault')" class="admin-btn-primary px-4 py-2.5 text-xs">📂 Open Content Vault Mirror →</button>
                 </div>
 
                 <!-- Quick Portal Switches + Latest Activities -->
@@ -152,13 +164,47 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 2: LIVE RADAR & FEED ==================== -->
+            <!-- ==================== TAB 2: CLOUD CONTENT VAULT (DIRECT SUMMARY + WEBSITE MIRROR) ==================== -->
+            <section id="tab_vault" class="atab-section hidden space-y-5">
+                <!-- DIRECT SUMMARY DASHBOARD -->
+                <div class="admin-glass p-5 rounded-2xl space-y-4">
+                    <div class="flex flex-wrap justify-between items-center gap-2">
+                        <div>
+                            <h3 class="font-black text-base">📊 Cloud Content Vault — Direct Summary</h3>
+                            <p class="text-[11px] font-bold opacity-65">Zero-Duplicate Auto-Archive • Agar main server se series hat jaye toh yahin se live chalegi</p>
+                        </div>
+                        <span id="vaultModeBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">Checking Vault DBs...</span>
+                    </div>
+                    <div id="vaultSummaryKpis" class="grid grid-cols-2 sm:grid-cols-5 gap-3"></div>
+                    <div id="vaultShardsHealth" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1"></div>
+                </div>
+
+                <!-- WEBSITE-MIRROR CONTENT EXPLORER -->
+                <div class="admin-glass p-5 rounded-2xl space-y-4">
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-sky-200/50 pb-3">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <button id="vaultBackBtn" onclick="vaultMirrorGoBack()" class="hidden px-3 py-1.5 rounded-xl bg-slate-900 text-white text-xs font-black border-0 cursor-pointer">← Back</button>
+                            <div class="min-w-0">
+                                <div id="vaultCrumb" class="text-[10px] font-black uppercase text-blue-600 dark:text-sky-400">Cloud Vault Root</div>
+                                <h3 id="vaultExplorerHeading" class="font-black text-base truncate">📂 All Saved Test Series (Website Mirror)</h3>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-1 sm:flex-initial max-w-xs">
+                            <input id="vaultSearchInput" type="text" oninput="filterVaultMirrorGrid()" placeholder="Search series / folder / test..." class="admin-input py-2 text-xs">
+                        </div>
+                    </div>
+
+                    <div id="vaultMirrorGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5"></div>
+                </div>
+            </section>
+
+            <!-- ==================== TAB 3: LIVE RADAR & FEED ==================== -->
             <section id="tab_radar" class="atab-section hidden space-y-5">
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <div class="flex justify-between items-center flex-wrap gap-2">
                         <div>
                             <h3 class="font-black text-base">📡 Live "Who Is Online Right Now" Radar</h3>
-                            <p class="text-[11px] font-bold opacity-65">Last 2 minutes mein active students (exact screen & device)</p>
+                            <p class="text-[11px] font-bold opacity-65">Last 3 minutes mein active students (exact screen & device)</p>
                         </div>
                         <span id="radarLiveCountPill" class="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-black">0 LIVE NOW</span>
                     </div>
@@ -166,12 +212,12 @@
                 </div>
 
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
-                    <h3 class="font-black text-base">🔴 Global Live Activity Feed (All 4 Shards)</h3>
+                    <h3 class="font-black text-base">🔴 Global Live Activity Feed (All Shards)</h3>
                     <div id="globalActivityList" class="space-y-2 text-xs"></div>
                 </div>
             </section>
 
-            <!-- ==================== TAB 3: ALL USERS & A-Z ==================== -->
+            <!-- ==================== TAB 4: ALL USERS & A-Z ==================== -->
             <section id="tab_users" class="atab-section hidden space-y-4">
                 <div class="admin-glass p-4 rounded-2xl space-y-3">
                     <div class="flex flex-wrap gap-2">
@@ -192,7 +238,7 @@
                 <div id="usersPagination" class="flex justify-center items-center gap-3 pt-2"></div>
             </section>
 
-            <!-- ==================== TAB 4: TOP PERFORMERS & TEST ANALYTICS ==================== -->
+            <!-- ==================== TAB 5: TOP PERFORMERS & TEST ANALYTICS ==================== -->
             <section id="tab_analytics" class="atab-section hidden space-y-5">
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <h3 class="font-black text-base">🏆 Top Performers Global Rank Board</h3>
@@ -205,7 +251,7 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 5: CLOUD TOKEN POOL ==================== -->
+            <!-- ==================== TAB 6: CLOUD TOKEN POOL ==================== -->
             <section id="tab_tokens" class="atab-section hidden space-y-5">
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <div class="flex flex-wrap justify-between items-center gap-2">
@@ -225,10 +271,9 @@
                 <div id="cloudTokensGrid" class="space-y-2.5"></div>
             </section>
 
-            <!-- ==================== TAB 6: CONTENT HUB (NOTICES, BROADCAST, QUIZ, CA, SCHEDULED MOCKS) ==================== -->
+            <!-- ==================== TAB 7: CONTENT HUB ==================== -->
             <section id="tab_content" class="atab-section hidden space-y-5">
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                    <!-- Notice Board -->
                     <div class="admin-glass p-5 rounded-2xl space-y-3">
                         <h3 class="font-black text-base">📢 Global Live Notice Board</h3>
                         <input id="notTitle" type="text" placeholder="Notice Title" class="admin-input">
@@ -245,7 +290,6 @@
                         <div id="noticesListBox" class="space-y-2 text-xs pt-2"></div>
                     </div>
 
-                    <!-- Targeted Group Broadcast -->
                     <div class="admin-glass p-5 rounded-2xl space-y-3">
                         <h3 class="font-black text-base">🎯 Targeted Group Broadcast (Inbox Bell)</h3>
                         <select id="bcGroup" onchange="document.getElementById('bcStateInp').classList.toggle('hidden', this.value!=='state')" class="admin-input">
@@ -261,7 +305,6 @@
                     </div>
                 </div>
 
-                <!-- Daily Current Affairs Capsule Publisher -->
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <h3 class="font-black text-base">📰 Daily Current Affairs & Static GK Capsules</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -273,7 +316,6 @@
                     <div id="caCapsulesAdminList" class="space-y-2 text-xs pt-2"></div>
                 </div>
 
-                <!-- Daily 5-Min Rapid Quiz Publisher & Scheduled Weekly Mocks -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <div class="admin-glass p-5 rounded-2xl space-y-3">
                         <h3 class="font-black text-base">⚡ Daily 5-Min Rapid Quiz Publisher</h3>
@@ -299,7 +341,7 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 7: KILL-SWITCHES, VERSION & PROMO POPUP ==================== -->
+            <!-- ==================== TAB 8: KILL-SWITCHES, VERSION & PROMO POPUP ==================== -->
             <section id="tab_controls" class="atab-section hidden space-y-5">
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <div class="admin-glass p-5 rounded-2xl space-y-3">
@@ -325,7 +367,7 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 8: 2-WAY USER REPORTS ==================== -->
+            <!-- ==================== TAB 9: 2-WAY USER REPORTS ==================== -->
             <section id="tab_reports" class="atab-section hidden space-y-4">
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <h3 class="font-black text-base">🚩 Student Reports & Question Mistake Flags (2-Way Reply)</h3>
@@ -333,18 +375,16 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 9: SECURITY, IP BANS, DIAGNOSTICS, ERRORS & AUDIT ==================== -->
+            <!-- ==================== TAB 10: SECURITY, IP BANS, DIAGNOSTICS, ERRORS & AUDIT ==================== -->
             <section id="tab_security" class="atab-section hidden space-y-5">
-                <!-- 1-Click System Diagnostics -->
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <div class="flex justify-between items-center flex-wrap gap-2">
-                        <h3 class="font-black text-base">🩺 1-Click Live System Diagnostics</h3>
+                        <h3 class="font-black text-base">🩺 1-Click Live System Diagnostics (User DBs + Vault DBs + Worker)</h3>
                         <button onclick="runDiagnostics()" class="admin-btn-primary px-4 py-2 text-xs">⚡ Run Health Check</button>
                     </div>
-                    <div id="diagnosticsBox" class="text-xs opacity-75 font-bold">Click "Run Health Check" to test all 4 MongoDB shards, Cloudflare Worker, and RWA API latency.</div>
+                    <div id="diagnosticsBox" class="text-xs opacity-75 font-bold">Click "Run Health Check" to test all MongoDB shards, Content Vault DBs, Cloudflare Worker, and RWA API latency.</div>
                 </div>
 
-                <!-- IP Ban Manager -->
                 <div class="admin-glass p-5 rounded-2xl space-y-3">
                     <h3 class="font-black text-base">🚫 Direct IP Ban Shield</h3>
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -355,7 +395,6 @@
                     <div id="bannedIpsList" class="space-y-2 text-xs"></div>
                 </div>
 
-                <!-- Error Logs & Admin Audit Logs -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
                     <div class="admin-glass p-5 rounded-2xl space-y-3">
                         <div class="flex justify-between items-center">
@@ -373,7 +412,7 @@
 
                 <div class="admin-glass p-5 rounded-2xl flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <h3 class="font-black text-base">💾 Encrypted 4-DB JSON Snapshot</h3>
+                        <h3 class="font-black text-base">💾 Encrypted Multi-DB JSON Snapshot</h3>
                         <p class="text-[11px] font-bold opacity-65">Sensitive fields (tokens, passwords, phones) backup mein bhi encrypted rehte hain.</p>
                     </div>
                     <button onclick="downloadClusterBackup()" class="admin-btn-primary px-5 py-2.5 text-xs">⬇ Download Encrypted Backup</button>
@@ -384,7 +423,7 @@
     </div>
 
     <!-- =========================================================
-         FULL USER A-Z DOSSIER MODAL (SCORECARDS, MISTAKES, BOOKMARKS, VIP, MESSAGE, FORCE LOGOUT)
+         FULL USER A-Z DOSSIER MODAL
          ========================================================= -->
     <div id="userDossierModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
         <div class="admin-glass w-full max-w-4xl max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
@@ -395,8 +434,6 @@
                 </div>
                 <button onclick="closeUserDossier()" class="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 font-black text-base border-0 cursor-pointer shrink-0">✕</button>
             </div>
-
-            <!-- Dossier Sub-Tabs -->
             <div id="dossierSubTabs" class="px-4 py-2.5 border-b border-sky-200/40 flex gap-2 overflow-x-auto">
                 <button onclick="switchDossierTab('info')" data-dtab="info" class="ufilter-pill active">👤 Profile & Controls</button>
                 <button onclick="switchDossierTab('tests')" data-dtab="tests" class="ufilter-pill">📊 Scorecards & Analysis</button>
@@ -404,8 +441,26 @@
                 <button onclick="switchDossierTab('bookmarks')" data-dtab="bookmarks" class="ufilter-pill">🔖 Bookmarks</button>
                 <button onclick="switchDossierTab('logs')" data-dtab="logs" class="ufilter-pill">🔴 Activity & Inbox</button>
             </div>
-
             <div id="dossierBody" class="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4 text-xs"></div>
+        </div>
+    </div>
+
+    <!-- =========================================================
+         CLOUD VAULT FULL Q-BANK PREVIEW MODAL
+         ========================================================= -->
+    <div id="vaultPreviewModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5">
+        <div class="admin-glass w-full max-w-4xl max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-4 sm:p-5 border-b border-sky-200/50 flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                    <h3 id="vaultPreviewTitle" class="font-black text-lg truncate">Cloud Vault Q-Bank Preview</h3>
+                    <div id="vaultPreviewMeta" class="text-xs font-bold opacity-70 truncate">Loading...</div>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    <button id="vaultDownloadJsonBtn" class="px-3 py-1.5 rounded-xl bg-blue-600 text-white font-black text-xs border-0 cursor-pointer">⬇ JSON</button>
+                    <button onclick="closeVaultPreview()" class="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 font-black text-base border-0 cursor-pointer">✕</button>
+                </div>
+            </div>
+            <div id="vaultPreviewBody" class="p-4 sm:p-5 overflow-y-auto flex-1 space-y-3 text-xs"></div>
         </div>
     </div>
 
