@@ -1,8 +1,9 @@
-const CACHE_NAME = "rwa-sky-pro-v1";
+const CACHE_NAME = "rwa-sky-pro-v2";
 const STATIC_ASSETS = [
     "./",
     "./index.html",
     "./style.css",
+    "./rwa-security.js",
     "./pro-suite.js",
     "./app.js",
     "./player.js",
