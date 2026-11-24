@@ -32,6 +32,107 @@ body {
     transition: background 0.25s ease, color 0.25s ease;
 }
 
+/* STYLE #5 UNIFIED LIVE BAR */
+.rwa-unified-live-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2.5px 9px 2.5px 7px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #ecfdf5 0%, #eff6ff 55%, #e0f2fe 100%);
+    border: 1px solid #a7f3d0;
+    box-shadow: 0 2px 6px rgba(16, 185, 129, 0.12);
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.25;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    margin-top: 2px;
+}
+.rwa-live-dot-pulse {
+    width: 6.5px;
+    height: 6.5px;
+    border-radius: 999px;
+    background: #10b981;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.65);
+    animation: rwaPulseRing 1.6s infinite;
+    flex-shrink: 0;
+}
+@keyframes rwaPulseRing {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.65); }
+    70% { box-shadow: 0 0 0 5px rgba(16, 185, 129, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+.rwa-ulb-live { color: #047857; font-weight: 900; }
+.rwa-ulb-sep { color: #94a3b8; font-weight: 900; }
+.rwa-ulb-date { color: #1e40af; font-weight: 800; }
+.rwa-ulb-time { color: #0f172a; font-weight: 900; }
+
+body.dark-mode .rwa-unified-live-bar {
+    background: linear-gradient(135deg, rgba(6, 78, 59, 0.55) 0%, rgba(15, 23, 42, 0.92) 60%, rgba(30, 58, 138, 0.55) 100%);
+    border-color: rgba(52, 211, 153, 0.35);
+}
+body.dark-mode .rwa-ulb-live { color: #34d399; }
+body.dark-mode .rwa-ulb-date { color: #7dd3fc; }
+body.dark-mode .rwa-ulb-time { color: #f8fafc; }
+
+/* ZEN FOCUS MODE */
+body.zen-mode #topHeaderNav,
+body.zen-mode #mobileBottomNav,
+body.zen-mode #playerBottomSection,
+body.zen-mode #liveNoticeBanner,
+body.zen-mode #playerTipStrip {
+    display: none !important;
+}
+body.zen-mode main {
+    max-width: 100% !important;
+    padding: 8px !important;
+}
+
+/* 4-BOX OTP DIGIT INPUTS */
+.rwa-otp-digit-box {
+    width: 52px;
+    height: 54px;
+    border-radius: 14px;
+    border: 2px solid #7dd3fc;
+    background: #f0f9ff;
+    color: #0f172a;
+    font-size: 22px;
+    font-weight: 900;
+    text-align: center;
+    outline: none;
+    transition: all 0.16s ease;
+}
+.rwa-otp-digit-box:focus {
+    border-color: #2563eb;
+    background: #ffffff;
+    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.18);
+}
+body.dark-mode .rwa-otp-digit-box {
+    background: #1e293b;
+    color: #ffffff;
+    border-color: #38bdf8;
+}
+
+/* 4-COLOUR QUESTION TIME-HEATMAP */
+.hm-cell {
+    height: 34px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 900;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.14s ease;
+}
+.hm-cell:active { transform: scale(0.94); }
+.hm-fc { background: #dcfce7; color: #15803d; border: 1.5px solid #86efac; }
+.hm-sc { background: #dbeafe; color: #1d4ed8; border: 1.5px solid #93c5fd; }
+.hm-fw { background: #fef3c7; color: #b45309; border: 1.5px solid #fcd34d; }
+.hm-sw { background: #fee2e2; color: #be123c; border: 1.5px solid #fca5a5; }
+.hm-un { background: #f1f5f9; color: #64748b; border: 1.5px solid #cbd5e1; }
+
 .sky-nav {
     background: var(--nav-bg);
     backdrop-filter: blur(14px);
@@ -709,6 +810,7 @@ video {
 .tcs-tabs-wrapper { background: #fff; border-bottom: 1px solid #ddd; overflow-x: auto; white-space: nowrap; flex-shrink: 0; z-index: 15; }
 .tcs-tab { display: inline-block; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #555; cursor: pointer; border-bottom: 3px solid transparent; }
 .tcs-tab.active { color: #1a237e; border-bottom: 3px solid #1a237e; font-weight: 800; background: #f8fafc; }
+.tcs-tab.locked { opacity: 0.55; cursor: not-allowed; }
 
 .tcs-q-info-bar { background: #f5f5f5; padding: 9px 16px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ddd; font-size: 13px; color: #555; flex-shrink: 0; }
 .tcs-q-badge { background: #757575; color: white; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; margin-right: 8px; font-size: 12px; }
