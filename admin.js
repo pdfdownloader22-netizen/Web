@@ -1,8 +1,8 @@
 // =========================================================
 // RWA ULTRA-PRO COMMAND CENTER ENGINE (admin.js)
-// Secured via rwa-security.js (HMAC-SHA256 + E2E AES-256)
-// Unlimited User & Content Vault DBs + Website-Mirror Explorer +
-// Direct Summary + Q-Bank Preview + RAM Cache Flush
+// Features: Automated Cloud Vault Scanner (Live Progress +
+// 3s Polling + Start/Stop + 450 MB Cap Alert), Unlimited DBs,
+// Website-Mirror Explorer, Direct Summary & RAM Cache Flush
 // =========================================================
 
 const ADMIN_API_BASE = "https://pdfsownlaoder.onrender.com";
@@ -18,7 +18,7 @@ let adminState = {
     cachedSettings: null,
     refreshLeft: AUTO_REFRESH_SECONDS,
     refreshTimerId: null,
-    // Cloud Content Vault Website-Mirror Navigation State
+    // Cloud Content Vault Website-Mirror + Auto-Scanner State
     vaultView: "series", // "series" | "folders" | "tests"
     vaultSeriesId: "",
     vaultSeriesTitle: "",
@@ -27,7 +27,9 @@ let adminState = {
     vaultSeriesCache: [],
     vaultFoldersCache: [],
     vaultTestsCache: [],
-    vaultPreviewDoc: null
+    vaultPreviewDoc: null,
+    vaultScanPollId: null,
+    wasScannerRunning: false
 };
 
 // =========================================================
@@ -120,10 +122,18 @@ window.unlockAdminPanel = async function() {
     }
 };
 
+function stopVaultScannerPolling() {
+    if (adminState.vaultScanPollId) {
+        clearInterval(adminState.vaultScanPollId);
+        adminState.vaultScanPollId = null;
+    }
+}
+
 window.lockAdminPanel = function(customMsg = "") {
     adminState.token = "";
     sessionStorage.removeItem("rwa_admin_sess_token");
     if (adminState.refreshTimerId) clearInterval(adminState.refreshTimerId);
+    stopVaultScannerPolling();
     document.getElementById("adminMainShell")?.classList.add("hidden");
     document.getElementById("adminLoginScreen")?.classList.remove("hidden");
     const errEl = document.getElementById("adminLoginErr");
@@ -210,6 +220,7 @@ if (localStorage.getItem("rwa_admin_dark_v1") === "1") {
 }
 
 window.switchAdminTab = function(tab) {
+    if (tab !== "vault") stopVaultScannerPolling();
     adminState.activeTab = tab;
     document.getElementById("adminSidebar")?.classList.remove("open-mob");
 
@@ -222,7 +233,7 @@ window.switchAdminTab = function(tab) {
 
     const titles = {
         overview: "📊 Overview & Multi-DB Cluster",
-        vault: "☁️ Cloud Content Vault (Summary & Website Mirror)",
+        vault: "☁️ Cloud Content Vault (Auto-Scanner & Website Mirror)",
         radar: "📡 Live Radar & Global Activity Feed",
         users: "👥 All Users & A-Z Dossier",
         analytics: "🏆 Top Performers & Test Analytics",
@@ -273,7 +284,6 @@ async function loadOverview() {
             <div class="text-xl sm:text-2xl font-black mt-2 ${k.cls} truncate">${k.val}</div>
         </div>`).join("");
 
-    // 7-Day Growth Chart
     const gBox = document.getElementById("growth7dChart");
     const days = st.growth_7d || [];
     const maxVal = Math.max(1, ...days.flatMap(d => [d.active_users, d.tests, d.new_users]));
@@ -293,7 +303,6 @@ async function loadOverview() {
             </div>`;
     }).join("");
 
-    // Unlimited User DBs + RAM Cache Badge
     const rc = st.ram_cache || {};
     const rcBadge = document.getElementById("ramCacheBadge");
     if (rcBadge) rcBadge.textContent = `⚡ RAM Cache: ${rc.cached_keys || 0} keys (${rc.hits || 0} hits)`;
@@ -321,13 +330,11 @@ async function loadOverview() {
         }).join("");
     }
 
-    // Overview Vault Quick Text
     const ovVault = document.getElementById("overviewVaultQuickText");
     if (ovVault) {
-        ovVault.textContent = `${vs.total_series || 0} Series • ${vs.total_folders || 0} Folders • ${vs.total_listed_tests || 0} Listed Tests • ${vs.total_full_banks || 0} Full Q-Banks (${vs.total_questions_archived || 0} Questions) across ${vs.connected_vault_dbs || 0} ${vs.using_dedicated ? "Dedicated Content Vault DB(s)" : "Shared Fallback DB(s)"}`;
+        ovVault.textContent = `${vs.total_series || 0} Series • ${vs.total_folders || 0} Folders • ${vs.total_listed_tests || 0} Listed Tests • ${vs.total_full_banks || 0} Full Q-Banks (${vs.total_questions_archived || 0} Questions) across ${vs.connected_vault_dbs || 0} ${vs.using_dedicated ? "Dedicated Content DB(s)" : "Shared Fallback DB(s)"}${vs.storage_full ? " • 🚨 450 MB FULL" : ""}`;
     }
 
-    // Quick Switches
     const s = st.settings || {};
     document.getElementById("quickSwitchesBox").innerHTML = `
         <label class="flex items-center justify-between p-3 rounded-xl bg-sky-50/70 dark:bg-slate-800 cursor-pointer">
@@ -354,51 +361,177 @@ async function loadOverview() {
 }
 
 // =========================================================
-// TAB 2: CLOUD CONTENT VAULT (DIRECT SUMMARY + WEBSITE MIRROR)
+// TAB 2: AUTOMATED CLOUD VAULT SCANNER + SUMMARY + WEBSITE MIRROR
 // =========================================================
+function renderVaultSummaryAndShards(vs) {
+    if (!vs) return;
+    document.getElementById("vaultStorageFullAlert")?.classList.toggle("hidden", !vs.storage_full);
+
+    const badge = document.getElementById("vaultModeBadge");
+    if (badge) {
+        if (vs.storage_full) {
+            badge.textContent = `🚨 Storage Full (${vs.max_mb_per_db || 450} MB Cap Reached)`;
+            badge.className = "px-3 py-1 rounded-full bg-rose-100 text-rose-800 text-xs font-black";
+        } else if (vs.using_dedicated) {
+            badge.textContent = `✅ ${vs.connected_vault_dbs} Dedicated Content DB(s) • ${vs.max_mb_per_db || 450} MB Cap`;
+            badge.className = "px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black";
+        } else {
+            badge.textContent = `ℹ️ Shared Fallback Mode (${vs.connected_vault_dbs} DB) — Add CONTENT_MONGO_URI_1`;
+            badge.className = "px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-black";
+        }
+    }
+
+    const vKpis = [
+        { lbl: "Saved Series", val: vs.total_series || 0, ico: "🏆", cls: "text-blue-600" },
+        { lbl: "Saved Folders", val: vs.total_folders || 0, ico: "📂", cls: "text-indigo-600" },
+        { lbl: "Listed Tests", val: vs.total_listed_tests || 0, ico: "📋", cls: "text-teal-600" },
+        { lbl: "Full Q-Banks", val: vs.total_full_banks || 0, ico: "☁️", cls: "text-emerald-600" },
+        { lbl: "Total Questions", val: vs.total_questions_archived || 0, ico: "❓", cls: "text-purple-600" }
+    ];
+    document.getElementById("vaultSummaryKpis").innerHTML = vKpis.map(k => `
+        <div class="kpi-card">
+            <div class="flex items-center justify-between"><span class="text-lg">${k.ico}</span><span class="text-[10px] font-black uppercase opacity-60">${k.lbl}</span></div>
+            <div class="text-2xl font-black mt-1.5 ${k.cls}">${k.val}</div>
+        </div>`).join("");
+
+    document.getElementById("vaultShardsHealth").innerHTML = (vs.per_shard || []).map(s => {
+        const cap = s.max_mb || 450;
+        const pct = Math.min(100, Math.round(((s.size_mb || 0) / cap) * 100));
+        const barColor = s.is_full ? "bg-rose-600" : (pct > 75 ? "bg-amber-500" : "bg-blue-600");
+        return `
+            <div class="p-3 rounded-2xl ${s.is_full ? "bg-rose-50 dark:bg-rose-950/30 border-rose-400" : "bg-sky-50/70 dark:bg-slate-800/80 border-sky-200/60 dark:border-slate-700"} border space-y-1.5">
+                <div class="flex justify-between text-xs font-black">
+                    <span>📦 ${esc(s.label)} ${s.is_full ? `<span class="text-rose-600">[450MB FULL]</span>` : ""}</span>
+                    <span>${s.size_mb || 0} / ${cap} MB</span>
+                </div>
+                <div class="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden"><div class="h-full ${barColor}" style="width:${pct}%"></div></div>
+                <div class="text-[11px] font-bold opacity-70">☁️ ${s.full_banks || 0} Full Tests • ❓ ${s.questions || 0} Questions</div>
+            </div>`;
+    }).join("") || `<div class="col-span-full text-xs opacity-65 font-bold">No Vault DB connected.</div>`;
+}
+
+function renderVaultScannerUI(scan) {
+    if (!scan) return;
+    const isRunning = Boolean(scan.running);
+    const pill = document.getElementById("vaultScanStatusPill");
+    const btnStart = document.getElementById("btnStartVaultScan");
+    const btnStop = document.getElementById("btnStopVaultScan");
+
+    const statusStyles = {
+        RUNNING: "bg-blue-600 text-white animate-pulse",
+        RETRYING: "bg-amber-500 text-white animate-pulse",
+        COMPLETED: "bg-emerald-600 text-white",
+        PAUSED_STORAGE_FULL: "bg-rose-600 text-white",
+        STOPPED: "bg-slate-600 text-white",
+        IDLE: "bg-slate-200 text-slate-800"
+    };
+    if (pill) {
+        pill.textContent = scan.status || "IDLE";
+        pill.className = `px-2.5 py-0.5 rounded-full text-[10px] font-black ${statusStyles[scan.status] || statusStyles.IDLE}`;
+    }
+
+    if (btnStart) {
+        btnStart.classList.toggle("hidden", isRunning);
+        btnStart.disabled = isRunning;
+    }
+    if (btnStop) btnStop.classList.toggle("hidden", !isRunning);
+
+    const pct = Math.min(100, Math.max(0, Number(scan.progress_percent || 0)));
+    const phaseEl = document.getElementById("vaultScanPhaseText");
+    const pctEl = document.getElementById("vaultScanPercentText");
+    const barEl = document.getElementById("vaultScanProgressBar");
+    const curEl = document.getElementById("vaultScanCurrentItem");
+
+    if (phaseEl) phaseEl.textContent = scan.current_phase || "Waiting for 11:00 PM IST or Admin trigger";
+    if (pctEl) pctEl.textContent = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    if (curEl) {
+        curEl.textContent = isRunning
+            ? `Series: ${scan.current_series || "--"} • Test: ${scan.current_test || "--"}`
+            : `Last Run (${scan.mode || "none"}): Started ${scan.started_at || "--"} • Finished ${scan.finished_at || "--"}`;
+    }
+
+    const counters = [
+        { lbl: "Series", val: `${scan.series_done || 0}/${scan.series_total || 0}`, cls: "text-blue-600" },
+        { lbl: "Folders", val: scan.folders_found || 0, cls: "text-indigo-600" },
+        { lbl: "Tests Found", val: scan.tests_found || 0, cls: "text-slate-700 dark:text-slate-200" },
+        { lbl: "Newly Saved", val: scan.tests_newly_saved || 0, cls: "text-emerald-600" },
+        { lbl: "Skipped (Dup)", val: scan.tests_skipped_existing || 0, cls: "text-sky-600" },
+        { lbl: "Retried OK", val: `${scan.retried_recovered || 0}/${scan.errors_queued || 0}`, cls: "text-amber-600" },
+        { lbl: "Perm Errors", val: scan.permanent_errors || 0, cls: "text-rose-600" }
+    ];
+    const cGrid = document.getElementById("vaultScanCountersGrid");
+    if (cGrid) {
+        cGrid.innerHTML = counters.map(c => `
+            <div class="p-2 rounded-xl bg-sky-50/70 dark:bg-slate-800 border border-sky-200/50 dark:border-slate-700">
+                <div class="text-[10px] font-bold opacity-65">${c.lbl}</div>
+                <div class="text-sm font-black mt-0.5 ${c.cls}">${c.val}</div>
+            </div>`).join("");
+    }
+
+    const logsBox = document.getElementById("vaultScanLogsBox");
+    if (logsBox && Array.isArray(scan.logs) && scan.logs.length > 0) {
+        logsBox.innerHTML = scan.logs.map(line => `<div>${esc(line)}</div>`).join("");
+    }
+
+    // Auto-manage 3-second live polling while running
+    if (isRunning) {
+        adminState.wasScannerRunning = true;
+        if (!adminState.vaultScanPollId && adminState.activeTab === "vault") {
+            adminState.vaultScanPollId = setInterval(pollVaultScanProgress, 3000);
+        }
+    } else {
+        stopVaultScannerPolling();
+        if (adminState.wasScannerRunning) {
+            adminState.wasScannerRunning = false;
+            adminToast(`☁️ Vault Scan ${scan.status}: ${scan.tests_newly_saved || 0} new test(s) saved!`, scan.status === "PAUSED_STORAGE_FULL" ? "error" : "success");
+            if (adminState.vaultView === "series") loadVaultMirrorSeries();
+        }
+    }
+}
+
+async function pollVaultScanProgress() {
+    if (adminState.activeTab !== "vault") {
+        stopVaultScannerPolling();
+        return;
+    }
+    try {
+        const res = await adminApi("/api/admin/vault/scan/status");
+        if (res.ok && res.data) {
+            if (res.data.summary) renderVaultSummaryAndShards(res.data.summary);
+            if (res.data.scan) renderVaultScannerUI(res.data.scan);
+        }
+    } catch {}
+}
+
+window.startManualVaultScan = async function() {
+    const res = await adminApi("/api/admin/vault/scan/start", "POST", {});
+    if (res.ok && res.data.status === "success") {
+        adminToast("🚀 Auto-Scan Started! Live progress dikh rahi hai.", "success");
+        renderVaultScannerUI(res.data.scan);
+    } else {
+        adminToast((res.data && res.data.message) || "Scan start nahi ho paya.", "error");
+        if (res.data && res.data.scan) renderVaultScannerUI(res.data.scan);
+    }
+};
+
+window.stopManualVaultScan = async function() {
+    const res = await adminApi("/api/admin/vault/scan/stop", "POST", {});
+    if (res.ok) {
+        adminToast("⏹ Stop signal bhej diya gaya hai.", "warning");
+        if (res.data && res.data.scan) renderVaultScannerUI(res.data.scan);
+    }
+};
+
 async function loadContentVaultTab(resetToRoot = false) {
     if (resetToRoot) adminState.vaultView = "series";
 
-    // 1. Direct Summary Dashboard
     const sumRes = await adminApi("/api/admin/vault/summary");
-    if (sumRes.ok && sumRes.data.summary) {
-        const vs = sumRes.data.summary;
-        const badge = document.getElementById("vaultModeBadge");
-        if (badge) {
-            badge.textContent = vs.using_dedicated
-                ? `✅ ${vs.connected_vault_dbs} Dedicated Content DB(s) Active`
-                : `ℹ️ Shared Fallback Mode (${vs.connected_vault_dbs} DB) — Add CONTENT_MONGO_URI_1`;
-            badge.className = vs.using_dedicated
-                ? "px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black"
-                : "px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-black";
-        }
-
-        const vKpis = [
-            { lbl: "Saved Series", val: vs.total_series || 0, ico: "🏆", cls: "text-blue-600" },
-            { lbl: "Saved Folders", val: vs.total_folders || 0, ico: "📂", cls: "text-indigo-600" },
-            { lbl: "Listed Tests", val: vs.total_listed_tests || 0, ico: "📋", cls: "text-teal-600" },
-            { lbl: "Full Q-Banks", val: vs.total_full_banks || 0, ico: "☁️", cls: "text-emerald-600" },
-            { lbl: "Total Questions", val: vs.total_questions_archived || 0, ico: "❓", cls: "text-purple-600" }
-        ];
-        document.getElementById("vaultSummaryKpis").innerHTML = vKpis.map(k => `
-            <div class="kpi-card">
-                <div class="flex items-center justify-between"><span class="text-lg">${k.ico}</span><span class="text-[10px] font-black uppercase opacity-60">${k.lbl}</span></div>
-                <div class="text-2xl font-black mt-1.5 ${k.cls}">${k.val}</div>
-            </div>`).join("");
-
-        document.getElementById("vaultShardsHealth").innerHTML = (vs.per_shard || []).map(s => {
-            const pct = Math.min(100, Math.round(((s.size_mb || 0) / (s.max_mb || 512)) * 100));
-            const barColor = pct > 80 ? "bg-rose-600" : (pct > 60 ? "bg-amber-500" : "bg-blue-600");
-            return `
-                <div class="p-3 rounded-2xl bg-sky-50/70 dark:bg-slate-800/80 border border-sky-200/60 dark:border-slate-700 space-y-1.5">
-                    <div class="flex justify-between text-xs font-black"><span>📦 ${esc(s.label)}</span><span>${s.size_mb || 0} MB / 512 MB</span></div>
-                    <div class="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden"><div class="h-full ${barColor}" style="width:${pct}%"></div></div>
-                    <div class="text-[11px] font-bold opacity-70">☁️ ${s.full_banks || 0} Full Tests • ❓ ${s.questions || 0} Questions</div>
-                </div>`;
-        }).join("") || `<div class="col-span-full text-xs opacity-65 font-bold">No Vault DB connected.</div>`;
+    if (sumRes.ok && sumRes.data) {
+        if (sumRes.data.summary) renderVaultSummaryAndShards(sumRes.data.summary);
+        if (sumRes.data.scan) renderVaultScannerUI(sumRes.data.scan);
     }
 
-    // 2. Render Current Website-Mirror Level
     if (adminState.vaultView === "series") await loadVaultMirrorSeries();
     else if (adminState.vaultView === "folders") await openVaultMirrorSeries(adminState.vaultSeriesId, adminState.vaultSeriesTitle);
     else if (adminState.vaultView === "tests") await openVaultMirrorTests(adminState.vaultSeriesId, adminState.vaultFolderId, adminState.vaultFolderTitle);
@@ -419,7 +552,7 @@ async function loadVaultMirrorSeries() {
     adminState.vaultSeriesCache = list;
 
     if (!list.length) {
-        grid.innerHTML = `<div class="col-span-full py-10 text-center text-xs font-bold opacity-70">Abhi Cloud Vault mein koi series save nahi hui hai. Jaise hi website par koi series ya test khulega, woh automatically yahan save ho jayega!</div>`;
+        grid.innerHTML = `<div class="col-span-full py-10 text-center text-xs font-bold opacity-70">Abhi Cloud Vault khaali hai. Upar <b>🚀 Start Auto-Scan Now</b> dabayein ya raat 11:00 PM IST ke auto-scan ka wait karein!</div>`;
         return;
     }
 
@@ -519,7 +652,7 @@ async function openVaultMirrorTests(seriesId, folderId, folderTitle) {
                 <div class="space-y-1.5">
                     <div class="flex justify-between items-center gap-1.5 flex-wrap">
                         <span class="px-2 py-0.5 rounded-full ${hasFull ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"} text-[10px] font-black">
-                            ${hasFull ? `✅ Full Q-Bank (${t.saved_questions_count || t.questions} Qs)` : "📋 Title Only (Not Opened Yet)"}
+                            ${hasFull ? `✅ Full Q-Bank (${t.saved_questions_count || t.questions} Qs)` : "📋 Title Only (Pending Scan)"}
                         </span>
                         ${t.vault_shard ? `<span class="px-2 py-0.5 rounded bg-sky-100 text-sky-900 text-[9px] font-black">${esc(t.vault_shard)}</span>` : ""}
                     </div>
@@ -529,7 +662,7 @@ async function openVaultMirrorTests(seriesId, folderId, folderTitle) {
                 <div class="flex items-center gap-2 pt-2 border-t border-sky-200/40">
                     ${hasFull
                         ? `<button onclick="previewVaultTest('${esc(t.test_id)}')" class="admin-btn-primary flex-1 py-2 text-xs">👁️ Preview Q-Bank</button>`
-                        : `<span class="flex-1 text-[11px] font-bold opacity-60">Auto-saves on 1st test load</span>`}
+                        : `<span class="flex-1 text-[11px] font-bold opacity-60">Will archive on next Auto-Scan</span>`}
                     <button onclick="deleteVaultTest('${esc(t.test_id)}')" class="px-3 py-2 rounded-xl bg-rose-100 text-rose-700 font-black text-xs border-0 cursor-pointer" title="Delete Test">🗑</button>
                 </div>
             </div>`;
