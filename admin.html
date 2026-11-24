@@ -23,7 +23,7 @@
             <div>
                 <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-800 text-[10px] font-black uppercase">E2E AES-256 Encrypted</span>
                 <h1 class="text-2xl font-black mt-2">RWA ULTRA ADMIN PRO</h1>
-                <p class="text-xs opacity-70 font-bold mt-1">Unlimited MongoDB Cluster • Cloud Vault • Brute-Force Shield</p>
+                <p class="text-xs opacity-70 font-bold mt-1">Unlimited MongoDB Cluster • Auto Cloud Vault • Brute-Force Shield</p>
             </div>
             <div class="text-left space-y-2">
                 <label class="text-xs font-extrabold opacity-80">Master Admin Key</label>
@@ -142,7 +142,7 @@
                         <h3 class="font-black text-base">☁️ Cloud Content Vault Quick Summary</h3>
                         <p id="overviewVaultQuickText" class="text-xs font-bold opacity-75 mt-1">Loading vault summary...</p>
                     </div>
-                    <button onclick="switchAdminTab('vault')" class="admin-btn-primary px-4 py-2.5 text-xs">📂 Open Content Vault Mirror →</button>
+                    <button onclick="switchAdminTab('vault')" class="admin-btn-primary px-4 py-2.5 text-xs">📂 Open Vault & Auto-Scanner →</button>
                 </div>
 
                 <!-- Quick Portal Switches + Latest Activities -->
@@ -164,14 +164,64 @@
                 </div>
             </section>
 
-            <!-- ==================== TAB 2: CLOUD CONTENT VAULT (DIRECT SUMMARY + WEBSITE MIRROR) ==================== -->
+            <!-- ==================== TAB 2: CLOUD CONTENT VAULT (AUTO-SCANNER + SUMMARY + WEBSITE MIRROR) ==================== -->
             <section id="tab_vault" class="atab-section hidden space-y-5">
+
+                <!-- 450 MB STORAGE FULL ALERT BANNER -->
+                <div id="vaultStorageFullAlert" class="hidden p-4 rounded-2xl bg-rose-600 text-white shadow-lg flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                        <div class="font-black text-sm">🚨 ALL CONTENT VAULT DBs HIT 450 MB LIMIT!</div>
+                        <div class="text-xs font-semibold opacity-95 mt-0.5">Auto-Scanner ruk gaya hai. Render Environment mein naya <code>CONTENT_MONGO_URI_N</code> add karke redeploy karein.</div>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-white/20 text-xs font-black">WAITING FOR NEW DB</span>
+                </div>
+
+                <!-- AUTOMATED CLOUD VAULT SCANNER CONTROL PANEL -->
+                <div class="admin-glass p-5 rounded-2xl space-y-4 border-2 border-blue-400/40">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <h3 class="font-black text-base">🤖 Automated Cloud Vault Scanner</h3>
+                                <span id="vaultScanStatusPill" class="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-800 text-[10px] font-black">IDLE</span>
+                            </div>
+                            <p class="text-[11px] font-bold opacity-70 mt-0.5">Auto-runs daily 11:00 PM – 12:00 AM IST • Zero Duplicates • Auto-Retries Failed Tests • 450 MB Safe Cap</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="btnStartVaultScan" onclick="startManualVaultScan()" class="admin-btn-primary px-4 py-2.5 text-xs">🚀 Start Auto-Scan Now</button>
+                            <button id="btnStopVaultScan" onclick="stopManualVaultScan()" class="hidden px-4 py-2.5 rounded-xl bg-rose-600 text-white font-black text-xs border-0 cursor-pointer">⏹ Stop Scan</button>
+                        </div>
+                    </div>
+
+                    <!-- LIVE PROGRESS BAR & CURRENT ITEM -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center text-xs font-black">
+                            <span id="vaultScanPhaseText" class="truncate">Waiting for 11:00 PM IST or Admin trigger</span>
+                            <span id="vaultScanPercentText" class="text-blue-600 dark:text-sky-400 shrink-0 ml-2">0%</span>
+                        </div>
+                        <div class="w-full h-3 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                            <div id="vaultScanProgressBar" class="h-full bg-gradient-to-r from-blue-600 via-indigo-600 to-emerald-500 transition-all duration-500" style="width:0%"></div>
+                        </div>
+                        <div id="vaultScanCurrentItem" class="text-[11px] font-bold opacity-75 truncate">Series: -- • Test: --</div>
+                    </div>
+
+                    <!-- LIVE SCAN COUNTERS -->
+                    <div id="vaultScanCountersGrid" class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 text-center text-[11px]"></div>
+
+                    <!-- LIVE SCAN LOG FEED -->
+                    <details open class="rounded-xl bg-slate-950/90 text-emerald-300 p-3 font-mono text-[11px]">
+                        <summary class="cursor-pointer font-black text-sky-300 select-none">📜 Live Scanner Logs (Latest 30)</summary>
+                        <div id="vaultScanLogsBox" class="mt-2 space-y-1 max-h-40 overflow-y-auto text-[10px] leading-relaxed">
+                            <div class="opacity-60">Ready. Click "Start Auto-Scan Now" to fetch new Series, Folders, Terms & Questions.</div>
+                        </div>
+                    </details>
+                </div>
+
                 <!-- DIRECT SUMMARY DASHBOARD -->
                 <div class="admin-glass p-5 rounded-2xl space-y-4">
                     <div class="flex flex-wrap justify-between items-center gap-2">
                         <div>
                             <h3 class="font-black text-base">📊 Cloud Content Vault — Direct Summary</h3>
-                            <p class="text-[11px] font-bold opacity-65">Zero-Duplicate Auto-Archive • Agar main server se series hat jaye toh yahin se live chalegi</p>
+                            <p class="text-[11px] font-bold opacity-65">Agar main server se koi series/test hat jaye toh website yahin se seedha live chalegi</p>
                         </div>
                         <span id="vaultModeBadge" class="px-3 py-1 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black">Checking Vault DBs...</span>
                     </div>
